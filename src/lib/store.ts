@@ -41,11 +41,19 @@ export interface Expense {
   relatedModule: 'procurement' | 'health' | 'feeding' | 'other';
 }
 
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
 export interface AppState {
   orders: Order[];
   feedingRecords: FeedingRecord[];
   healthRecords: HealthRecord[];
   expenses: Expense[];
+  chatMessages: ChatMessage[];
 }
 
 const STORAGE_KEY = 'zhongfu-console-data';
@@ -97,15 +105,26 @@ const defaultExpenses: Expense[] = [
   { id: 'e9', date: '2025-08-20', category: '驱虫', amount: 85, description: '体内驱虫药', relatedModule: 'health' },
 ];
 
+const defaultChatMessages: ChatMessage[] = [
+  { id: 'c0', role: 'assistant', content: '你好！我是钟福的专属助手，有什么可以帮你的吗？你可以问我关于喂食、支出、健康等方面的问题。', timestamp: new Date().toISOString() },
+];
+
 export function loadState(): AppState {
   if (typeof window === 'undefined') {
-    return { orders: defaultOrders, feedingRecords: defaultFeedingRecords, healthRecords: defaultHealthRecords, expenses: defaultExpenses };
+    return { orders: defaultOrders, feedingRecords: defaultFeedingRecords, healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as AppState;
+    if (raw) {
+      const parsed = JSON.parse(raw) as AppState;
+      // Migration: add chatMessages if missing from old data
+      if (!parsed.chatMessages) {
+        parsed.chatMessages = defaultChatMessages;
+      }
+      return parsed;
+    }
   } catch { /* ignore */ }
-  const initial = { orders: defaultOrders, feedingRecords: defaultFeedingRecords, healthRecords: defaultHealthRecords, expenses: defaultExpenses };
+  const initial = { orders: defaultOrders, feedingRecords: defaultFeedingRecords, healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
   return initial;
 }

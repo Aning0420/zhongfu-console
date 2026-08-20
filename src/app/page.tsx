@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Clock,
   PawPrint,
+  MessageCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -170,6 +171,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Recent Chat History */}
+      <RecentChatSection />
+
       {/* Quick Actions */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <QuickAction icon={ShoppingCart} label="新建采购" href="/procurement" color="text-accent" bg="bg-accent/8" />
@@ -241,5 +245,69 @@ function QuickAction({
       </div>
       <span className="text-sm font-medium text-foreground">{label}</span>
     </a>
+  );
+}
+
+function RecentChatSection() {
+  const { state } = useAppContext();
+
+  // Get user messages (questions) with their assistant replies, most recent first
+  const conversations = useMemo(() => {
+    const msgs = state.chatMessages.filter(m => m.role === 'user');
+    const allMsgs = state.chatMessages;
+    return msgs
+      .map((userMsg, idx) => {
+        // Find the assistant reply that follows this user message
+        const userIndex = allMsgs.findIndex(m => m.id === userMsg.id);
+        const reply = userIndex >= 0 && userIndex < allMsgs.length - 1 && allMsgs[userIndex + 1].role === 'assistant'
+          ? allMsgs[userIndex + 1]
+          : null;
+        return { user: userMsg, reply };
+      })
+      .reverse()
+      .slice(0, 5);
+  }, [state.chatMessages]);
+
+  if (conversations.length === 0) return null;
+
+  const formatTime = (ts: string) => {
+    try {
+      const d = new Date(ts);
+      const now = new Date();
+      if (d.toDateString() === now.toDateString()) {
+        return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+      }
+      return `${d.getMonth() + 1}/${d.getDate()}`;
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <div className="card-warm p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <MessageCircle className="w-4 h-4 text-accent" />
+        <h2 className="text-base font-semibold text-foreground">最近对话</h2>
+        <span className="text-xs text-muted-foreground ml-auto">{state.chatMessages.filter(m => m.role === 'user').length} 条对话</span>
+      </div>
+      <div className="space-y-3">
+        {conversations.map(({ user, reply }) => (
+          <div key={user.id} className="flex items-start gap-3 py-1.5">
+            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+              <MessageCircle className="w-4 h-4 text-accent" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium text-foreground truncate">{user.content}</p>
+              </div>
+              {reply && (
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">{reply.content.split('\n')[0]}</p>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground shrink-0">{formatTime(user.timestamp)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
