@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { AppProvider } from '@/components/providers';
 import Sidebar, { FloatingPawButton } from '@/components/sidebar';
-import ChatDialog from '@/components/chat-dialog';
+import { ChatDialog } from '@/components/chat-dialog';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [chatOpen, setChatOpen] = useState(false);

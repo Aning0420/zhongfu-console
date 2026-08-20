@@ -1,388 +1,457 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Send, MessageCircle, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useAppContext } from '@/components/providers';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { X, Send, ImagePlus, Trash2, Sparkles } from 'lucide-react';
+import { useAppContext } from './providers';
 import { cn } from '@/lib/utils';
-import type { ChatMessage } from '@/lib/store';
 
-/* ── 意图解析引擎 ── */
-
-const MEAL_KEYWORDS: Record<string, string> = {
-  '早餐': 'breakfast', '早饭': 'breakfast', '早上': 'breakfast',
-  '午餐': 'lunch', '午饭': 'lunch', '中午': 'lunch',
-  '晚餐': 'dinner', '晚饭': 'dinner', '晚上': 'dinner',
-  '零食': 'snack', '加餐': 'snack', '小吃': 'snack',
-};
-
-const CATEGORY_MAP: Record<string, string> = {
-  '猫粮': '主粮', '狗粮': '主粮', '主粮': '主粮', '粮': '主粮',
-  '罐头': '零食', '妙鲜包': '零食', '零食': '零食', '肉干': '零食', '冻干': '零食',
-  '猫砂': '日用', '尿垫': '日用', '沐浴露': '日用', '日用': '日用', '清洁': '日用',
-  '化毛膏': '保健品', '营养膏': '保健品', '羊奶粉': '保健品', '维生素': '保健品', '保健': '保健品', '钙片': '保健品',
-  '玩具': '玩具', '逗猫棒': '玩具', '猫爬架': '玩具',
-  '驱虫': '医疗', '疫苗': '医疗', '体检': '医疗', '看病': '医疗', '药': '医疗',
-};
-
-function detectCategory(text: string): string {
-  for (const [keyword, cat] of Object.entries(CATEGORY_MAP)) {
-    if (text.includes(keyword)) return cat;
-  }
-  return '其他';
+interface DisplayMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  imageUrl?: string;
+  synced?: boolean;
+  timestamp: Date;
 }
 
-function extractAmount(text: string): number | null {
-  // Match patterns: 200块, 200元, ¥200, 200
-  const patterns = [
-    /(\d+\.?\d*)\s*[块元]/,
-    /[¥￥]\s*(\d+\.?\d*)/,
-    /花了?\s*(\d+\.?\d*)/,
-    /(\d+\.?\d*)\s*块/,
-  ];
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m) return parseFloat(m[1]);
-  }
-  return null;
-}
-
-function extractWeight(text: string): number | null {
-  const m = text.match(/(\d+\.?\d*)\s*(kg|公斤|斤)/i);
-  if (m) {
-    let val = parseFloat(m[1]);
-    if (m[2] === '斤') val = val / 2; // 斤 to kg
-    return val;
-  }
-  // Also try just number with "体重" context
-  const m2 = text.match(/体重\s*(\d+\.?\d*)/);
-  if (m2) return parseFloat(m2[1]);
-  return null;
-}
-
-function extractQuantity(text: string): { qty: number; unit: string } | null {
-  const m = text.match(/(\d+\.?\d*)\s*(kg|斤|包|袋|罐|盒|瓶|支|个|件|套|条)/i);
-  if (m) return { qty: parseFloat(m[1]), unit: m[2] };
-  return null;
-}
-
-function extractItemName(text: string): string {
-  // Remove action keywords and amount info to get item name
-  let name = text
-    .replace(/(我|今天|昨天|刚|又|也|了|的|啦|吧|啊|呢|哦|～|~)/g, '')
-    .replace(/(买了|采购|下单|购入|入手|花了|支出|喂了|喂食|吃了|称了|体重|去了|看了)/g, '')
-    .replace(/(\d+\.?\d*\s*[块元kg斤包袋罐盒瓶支个件套条])/g, '')
-    .replace(/[¥￥]\s*\d+/g, '')
-    .trim();
-  return name || '未命名物品';
-}
-
-interface ParseResult {
-  intent: 'purchase' | 'feeding' | 'weight' | 'query' | 'chat';
-  data: Record<string, unknown>;
-  confirmMsg: string;
-}
-
-function parseIntent(text: string, ctx: {
-  orders: { itemName: string; quantity: number; consumed: number; unit: string }[];
-  feedingRecords: { date: string; mealType: string; completed: boolean }[];
-  expenses: { amount: number; date: string }[];
-  healthRecords: { type: string; date: string; weight?: number }[];
-}): ParseResult {
-  const today = new Date().toISOString().split('T')[0];
-  const thisMonth = today.slice(0, 7);
-
-  // ── 1. 购买/支出意图 ──
-  if (/买了|采购|下单|购入|入手|花了|支出/.test(text)) {
-    const amount = extractAmount(text);
-    const category = detectCategory(text);
-    const itemName = extractItemName(text);
-    const qty = extractQuantity(text);
-
-    return {
-      intent: 'purchase',
-      data: { itemName, category, amount, qty, date: today },
-      confirmMsg: [
-        `好的，已帮你记录：`,
-        `- 采购：${itemName}${qty ? ` ${qty.qty}${qty.unit}` : ''}`,
-        amount ? `- 支出：¥${amount}（分类：${category}）` : '',
-        '',
-        '数据已同步到采购总览和支出记账~',
-      ].filter(Boolean).join('\n'),
-    };
-  }
-
-  // ── 2. 喂食意图 ──
-  if (/喂了|喂食|吃了|喂|打卡/.test(text) && !/买了|花了/.test(text)) {
-    let mealType = 'breakfast';
-    for (const [kw, mt] of Object.entries(MEAL_KEYWORDS)) {
-      if (text.includes(kw)) { mealType = mt; break; }
-    }
-    const mealLabels: Record<string, string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', snack: '零食' };
-    const foodName = extractItemName(text);
-    const qty = extractQuantity(text);
-
-    return {
-      intent: 'feeding',
-      data: { mealType, foodName: foodName === '未命名物品' ? '猫粮' : foodName, qty, date: today },
-      confirmMsg: `已帮你打卡${mealLabels[mealType]}：${foodName === '未命名物品' ? '猫粮' : foodName}${qty ? ` ${qty.qty}${qty.unit}` : ''} ✅`,
-    };
-  }
-
-  // ── 3. 体重意图 ──
-  if (/体重|称了|称重/.test(text)) {
-    const weight = extractWeight(text);
-    if (weight) {
-      return {
-        intent: 'weight',
-        data: { weight, date: today },
-        confirmMsg: `已记录体重：${weight}kg ✅ 快去健康管理看看趋势吧~`,
-      };
-    }
-    return {
-      intent: 'chat',
-      data: {},
-      confirmMsg: '请告诉我具体体重数值哦，比如"体重4.5kg"',
-    };
-  }
-
-  // ── 4. 查询意图 ──
-  if (/统计|多少|剩余|还有|库存|本月|今天|花了多少|支出/.test(text)) {
-    const monthExpenses = ctx.expenses.filter(e => e.date.startsWith(thisMonth));
-    const totalMonth = monthExpenses.reduce((s, e) => s + e.amount, 0);
-    const todayFeedings = ctx.feedingRecords.filter(r => r.date === today);
-    const completedCount = todayFeedings.filter(r => r.completed).length;
-    const latestWeight = ctx.healthRecords.filter(r => r.type === 'weight' && r.weight).sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))[0];
-
-    const lines = [`当前状态一览：`];
-    if (totalMonth > 0) lines.push(`- 本月支出：¥${totalMonth.toLocaleString()}`);
-    lines.push(`- 今日喂食：${completedCount}/${todayFeedings.length || 3} 已完成`);
-    if (latestWeight?.weight) lines.push(`- 最新体重：${latestWeight.weight}kg`);
-    const lowStock = ctx.orders.filter(o => {
-      const ratio = (o.quantity - o.consumed) / o.quantity;
-      return ratio < 0.3;
-    });
-    if (lowStock.length > 0) {
-      lines.push(`- 库存预警：${lowStock.map(o => o.itemName).join('、')}不足`);
-    }
-
-    return { intent: 'query', data: {}, confirmMsg: lines.join('\n') };
-  }
-
-  // ── 5. 默认闲聊 ──
-  return {
-    intent: 'chat',
-    data: {},
-    confirmMsg: `收到！你可以试试这样跟我说：\n\n- "买了猫粮 200块" → 自动录入采购+支出\n- "喂了早餐" → 自动打卡喂食\n- "体重4.5kg" → 记录体重\n- "本月统计" → 查看数据概览`,
-  };
-}
-
-/* ── 快捷回复 ── */
-
-const quickReplies = [
+const QUICK_REPLIES = [
   '本月统计',
-  '今天喂食了吗',
   '库存不足的物资',
-  '买了猫粮200块',
+  '今天喂食了吗',
 ];
 
-/* ── 组件 ── */
-
-let msgCounter = 2000;
-function nextId(): string {
-  msgCounter += 1;
-  return String(msgCounter);
+let _msgId = 5000;
+function genMsgId(): string {
+  _msgId += 1;
+  return `msg_${_msgId}_${Date.now()}`;
 }
 
-export default function ChatDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { state, addOrder, addFeedingRecord, addHealthRecord, addExpense, addChatMessages, clearChatMessages } = useAppContext();
-  const [input, setInput] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const {
+    addOrder, addFeedingRecord, addHealthRecord, addExpense,
+  } = useAppContext();
 
-  // Display messages = persisted messages from context
-  const messages = state.chatMessages;
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load chat history from Supabase on first open
+  const loadHistory = useCallback(async () => {
+    if (historyLoaded) return;
+    try {
+      const res = await fetch('/api/chat-history');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.messages && data.messages.length > 0) {
+        const historyMsgs: DisplayMessage[] = data.messages
+          .reverse()
+          .map((m: Record<string, unknown>) => ({
+            id: m.id as string,
+            role: m.role as 'user' | 'assistant',
+            content: (m.content as string).replace(/---SYNC_DATA_START---[\s\S]*?---SYNC_DATA_END---/g, '').trim(),
+            imageUrl: (m.image_url as string) || undefined,
+            synced: !!m.synced_data,
+            timestamp: new Date(m.created_at as string),
+          }));
+        setMessages(historyMsgs);
+      }
+      setHistoryLoaded(true);
+    } catch {
+      // Silently fail - localStorage data still works
+    }
+  }, [historyLoaded]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+    if (open) loadHistory();
+  }, [open, loadHistory]);
 
-  const processMessage = useCallback((text: string) => {
-    const content = text.trim();
-    if (!content) return;
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
 
-    // 1. Add user message
-    const userMsg = { role: 'user' as const, content, timestamp: new Date().toISOString() };
+  // Handle image file selection
+  const handleImageSelect = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setPendingImage(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
-    // 2. Parse intent
-    const result = parseIntent(content, {
-      orders: state.orders,
-      feedingRecords: state.feedingRecords,
-      expenses: state.expenses,
-      healthRecords: state.healthRecords,
-    });
+  // Handle paste event for images
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) handleImageSelect(file);
+        break;
+      }
+    }
+  }, [handleImageSelect]);
 
-    // 3. Execute data sync based on intent
+  // Sync data to app modules
+  const syncData = useCallback((syncData: { type: string; data: Record<string, unknown> }) => {
     const today = new Date().toISOString().split('T')[0];
+    const now = new Date().toISOString();
 
-    switch (result.intent) {
-      case 'purchase': {
-        const d = result.data;
-        const itemName = d.itemName as string;
-        const category = d.category as string;
-        const amount = d.amount as number | null;
-        const qty = d.qty as { qty: number; unit: string } | null;
-
-        // Add order
+    switch (syncData.type) {
+      case 'procurement': {
+        const d = syncData.data;
         addOrder({
-          itemName,
-          category,
-          quantity: qty?.qty || 1,
-          unit: qty?.unit || '个',
-          unitPrice: amount || 0,
+          itemName: String(d.item_name || '未知物品'),
+          category: String(d.category || 'daily') as 'food' | 'supplies' | 'health' | 'daily',
+          quantity: Number(d.quantity) || 1,
+          unit: String(d.unit || '个'),
+          unitPrice: Number(d.price) || 0,
+          supplier: String(d.supplier || '线上'),
           purchaseDate: today,
           status: 'delivered',
           consumed: 0,
-          supplier: '对话录入',
         });
-
-        // Add expense if amount exists
-        if (amount && amount > 0) {
-          addExpense({
-            date: today,
-            category,
-            amount,
-            description: `${itemName}${qty ? ` ${qty.qty}${qty.unit}` : ''}`,
-            relatedModule: 'procurement',
-          });
-        }
+        break;
+      }
+      case 'expense': {
+        const d = syncData.data;
+        addExpense({
+          category: String(d.category || '日常'),
+          amount: Number(d.amount) || 0,
+          description: String(d.description || '支出'),
+          date: today,
+          relatedModule: 'other',
+        });
         break;
       }
       case 'feeding': {
-        const d = result.data;
-        const mealType = d.mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack';
-        const foodName = d.foodName as string;
-        const qty = d.qty as { qty: number; unit: string } | null;
-
+        const d = syncData.data;
         addFeedingRecord({
           date: today,
-          mealType,
-          foodName,
-          amount: qty ? `${qty.qty}${qty.unit}` : '适量',
+          mealType: (String(d.meal_type) || 'snack') as 'breakfast' | 'lunch' | 'dinner' | 'snack',
+          foodName: String(d.food_name || '猫粮'),
+          amount: String(d.amount || ''),
           completed: true,
-          note: '对话助手录入',
+          note: String(d.note || ''),
         });
         break;
       }
       case 'weight': {
-        const d = result.data;
-        const weight = d.weight as number;
-
+        const d = syncData.data;
         addHealthRecord({
-          date: today,
           type: 'weight',
+          date: now,
           title: '体重记录',
           detail: '对话助手录入',
-          weight,
+          weight: Number(d.weight) || 0,
         });
         break;
       }
-      default:
+      case 'health_visit': {
+        const d = syncData.data;
+        addHealthRecord({
+          type: 'visit',
+          date: now,
+          title: String(d.reason || '常规检查'),
+          detail: String(d.description || ''),
+          hospital: '宠物医院',
+        });
         break;
+      }
     }
+  }, [addOrder, addFeedingRecord, addHealthRecord, addExpense]);
 
-    // 4. Add assistant reply
-    const assistantMsg = { role: 'assistant' as const, content: result.confirmMsg, timestamp: new Date().toISOString() };
+  // Send message with streaming
+  const sendMessage = useCallback(async (content: string, image?: string) => {
+    if (!content.trim() && !image) return;
+    setLoading(true);
 
-    // 5. Persist both messages
-    addChatMessages([userMsg, assistantMsg]);
+    const userMsgId = genMsgId();
+    const userMsg: DisplayMessage = {
+      id: userMsgId,
+      role: 'user',
+      content: content.trim(),
+      imageUrl: image,
+      timestamp: new Date(),
+    };
+
+    const assistantMsgId = genMsgId();
+    const assistantMsg: DisplayMessage = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+    };
+
+    setMessages(prev => [...prev, userMsg, assistantMsg]);
     setInput('');
-  }, [state, addOrder, addFeedingRecord, addHealthRecord, addExpense, addChatMessages]);
+    setPendingImage(null);
 
-  const handleSend = useCallback((text?: string) => {
-    processMessage(text || input);
-  }, [input, processMessage]);
+    try {
+      // Build message history for API
+      const apiMessages = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-10)
+        .map(m => ({ role: m.role, content: m.content }));
+      apiMessages.push({ role: 'user' as const, content: content.trim() });
 
-  if (!open) return null;
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: apiMessages, image }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No reader');
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        const lines = text.split('\n');
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') continue;
+
+          try {
+            const data = JSON.parse(payload);
+            if (data.text) {
+              fullText += data.text;
+              // Clean sync data markers from display
+              const displayText = fullText
+                .replace(/---SYNC_DATA_START---[\s\S]*?---SYNC_DATA_END---/g, '')
+                .trim();
+              setMessages(prev =>
+                prev.map(m => m.id === assistantMsgId ? { ...m, content: displayText } : m)
+              );
+            }
+            if (data.syncData) {
+              syncData(data.syncData);
+              setMessages(prev =>
+                prev.map(m => m.id === assistantMsgId ? { ...m, synced: true } : m)
+              );
+            }
+          } catch {
+            // Skip malformed chunks
+          }
+        }
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : '网络错误';
+      setMessages(prev =>
+        prev.map(m => m.id === assistantMsgId
+          ? { ...m, content: `抱歉，出了点问题：${errMsg}` }
+          : m
+        )
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [messages, syncData]);
+
+  const handleSubmit = useCallback(() => {
+    sendMessage(input, pendingImage || undefined);
+  }, [input, pendingImage, sendMessage]);
+
+  const handleClear = useCallback(async () => {
+    setMessages([]);
+    try {
+      await fetch('/api/chat-history', { method: 'DELETE' });
+    } catch {
+      // Silently fail
+    }
+  }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end p-4 sm:items-center sm:justify-center">
-      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[420px] h-[560px] bg-card rounded-2xl border border-border shadow-2xl flex flex-col overflow-hidden fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 h-14 border-b border-border shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-accent/15 flex items-center justify-center">
-              <MessageCircle className="w-4 h-4 text-accent" />
+    <>
+      {/* Dialog */}
+      {open && (
+        <div className="fixed bottom-6 right-6 w-[400px] h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-[#D6E8F5] animate-in fade-in slide-in-from-bottom-4 duration-200">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#D6E8F5]">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-[#5CB8E4] flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-white" />
+              </div>
+              <span className="font-semibold text-[#2D3E50]">智能助手</span>
+              <span className="text-[10px] text-[#6B8A9E] bg-[#E8F4FD] px-1.5 py-0.5 rounded-full">AI</span>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">钟福助手</p>
-              <p className="text-xs text-muted-foreground">说句话就能帮你记数据</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={clearChatMessages} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="清空对话">
-              <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
-            </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-              <X className="w-4 h-4 text-muted-foreground" />
-            </button>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {messages.map(msg => (
-            <div key={msg.id} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
-              <div
-                className={cn(
-                  'max-w-[85%] px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-line',
-                  msg.role === 'user'
-                    ? 'bg-accent text-white rounded-2xl rounded-br-md'
-                    : 'bg-muted text-foreground rounded-2xl rounded-bl-md'
-                )}
+            <div className="flex items-center gap-1">
+              {messages.length > 0 && (
+                <button
+                  onClick={handleClear}
+                  className="w-8 h-8 rounded-full hover:bg-red-50 text-[#6B8A9E] hover:text-[#E88888] transition-colors flex items-center justify-center"
+                  title="清空记录"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="w-8 h-8 rounded-full hover:bg-[#E8F4FD] text-[#6B8A9E] transition-colors flex items-center justify-center"
               >
-                {msg.content}
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            {messages.length === 0 && (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 rounded-full bg-[#89CFF0]/20 flex items-center justify-center mx-auto mb-4">
+                  <Sparkles className="w-8 h-8 text-[#5CB8E4]" />
+                </div>
+                <p className="text-sm text-[#6B8A9E] mb-1">你好！我是你的智能助手</p>
+                <p className="text-xs text-[#6B8A9E]/70 mb-4">可以帮你录入数据、查询信息</p>
+                <div className="text-[11px] text-[#6B8A9E]/60 space-y-1">
+                  <p>试试说：</p>
+                  <p>"买了猫粮200块"</p>
+                  <p>"喂了早餐"</p>
+                  <p>"体重4.5kg"</p>
+                  <p>或者直接发图片给我识别</p>
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={cn('flex gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start')}
+              >
+                {msg.role === 'assistant' && (
+                  <div className="w-7 h-7 rounded-full bg-[#89CFF0] flex items-center justify-center shrink-0 mt-0.5">
+                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                  </div>
+                )}
+                <div
+                  className={cn(
+                    'max-w-[280px] rounded-2xl px-3.5 py-2.5 text-sm',
+                    msg.role === 'user'
+                      ? 'bg-[#5CB8E4] text-white rounded-br-md'
+                      : 'bg-[#E8F4FD] text-[#2D3E50] rounded-bl-md'
+                  )}
+                >
+                  {msg.imageUrl && (
+                    <div className="mb-2 rounded-lg overflow-hidden">
+                      <img src={msg.imageUrl} alt="uploaded" className="max-w-full max-h-40 object-cover" />
+                    </div>
+                  )}
+                  {msg.content ? (
+                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                  ) : (
+                    <span className="inline-flex gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#6B8A9E]/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#6B8A9E]/40 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#6B8A9E]/40 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </span>
+                  )}
+                  {msg.synced && (
+                    <div className="mt-1.5 flex items-center gap-1 text-[10px] opacity-60">
+                      <span className="w-1 h-1 rounded-full bg-green-400" />
+                      已同步到数据
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Quick replies */}
+          {messages.length === 0 && (
+            <div className="px-4 pb-2 flex flex-wrap gap-2">
+              {QUICK_REPLIES.map((text) => (
+                <button
+                  key={text}
+                  onClick={() => sendMessage(text)}
+                  className="text-xs px-3 py-1.5 rounded-full border border-[#D6E8F5] text-[#6B8A9E] hover:border-[#5CB8E4] hover:text-[#5CB8E4] transition-colors"
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Image preview */}
+          {pendingImage && (
+            <div className="px-4 pb-2">
+              <div className="relative inline-block">
+                <img src={pendingImage} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-[#D6E8F5]" />
+                <button
+                  onClick={() => setPendingImage(null)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#E88888] text-white flex items-center justify-center"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               </div>
             </div>
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
+          )}
 
-        {/* Quick Replies */}
-        <div className="px-4 pb-2 flex gap-2 overflow-x-auto shrink-0">
-          {quickReplies.map(q => (
-            <button
-              key={q}
-              onClick={() => handleSend(q)}
-              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border border-border text-muted-foreground hover:bg-accent/5 hover:text-accent hover:border-accent/30 transition-colors"
-            >
-              {q}
-            </button>
-          ))}
-        </div>
-
-        {/* Input */}
-        <div className="px-4 pb-4 pt-2 shrink-0">
-          <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-accent/40 transition-colors">
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              placeholder='试试说 "买了猫粮200块"...'
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-            />
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => handleSend()}
-              disabled={!input.trim()}
-              className="w-8 h-8 shrink-0 text-accent hover:bg-accent/10"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
+          {/* Input */}
+          <div className="px-4 pb-4 pt-2 border-t border-[#D6E8F5]">
+            <div className="flex items-end gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleImageSelect(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-9 h-9 rounded-full hover:bg-[#E8F4FD] text-[#6B8A9E] hover:text-[#5CB8E4] transition-colors flex items-center justify-center shrink-0"
+                title="上传图片"
+              >
+                <ImagePlus className="w-4.5 h-4.5" />
+              </button>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!loading) handleSubmit();
+                  }
+                }}
+                onPaste={handlePaste}
+                placeholder="说点什么...（可粘贴图片）"
+                className="flex-1 bg-[#E8F4FD] rounded-full px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#89CFF0] transition-shadow"
+                disabled={loading}
+              />
+              <button
+                onClick={handleSubmit}
+                disabled={loading || (!input.trim() && !pendingImage)}
+                className={cn(
+                  'w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all',
+                  input.trim() || pendingImage
+                    ? 'bg-[#5CB8E4] text-white hover:bg-[#4AA8D4]'
+                    : 'bg-[#E8F4FD] text-[#6B8A9E]/50'
+                )}
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }

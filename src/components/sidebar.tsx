@@ -40,7 +40,7 @@ export default function Sidebar({ collapsed, onToggle, onOpenChat }: SidebarProp
               className={cn(
                 'flex flex-col items-center justify-center w-[58px] h-[54px] rounded-xl text-center transition-all duration-150 btn-press group',
                 isActive
-                  ? 'bg-accent/15 shadow-[0_1px_4px_rgba(135,206,235,0.15)]'
+                  ? 'bg-accent/15 shadow-[0_1px_4px_rgba(92,184,228,0.15)]'
                   : 'hover:bg-sidebar-accent'
               )}
               title={item.label}
@@ -88,7 +88,7 @@ export function FloatingPawButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-accent/90 text-white shadow-[0_4px_16px_rgba(135,206,235,0.4)] flex items-center justify-center text-xl hover:scale-105 active:scale-95 transition-all duration-200 hover:shadow-[0_6px_20px_rgba(135,206,235,0.5)]"
+      className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-accent/90 text-white shadow-[0_4px_16px_rgba(92,184,228,0.4)] flex items-center justify-center text-xl hover:scale-105 active:scale-95 transition-all duration-200 hover:shadow-[0_6px_20px_rgba(92,184,228,0.5)]"
       title="展开侧边栏"
     >
       🐾
