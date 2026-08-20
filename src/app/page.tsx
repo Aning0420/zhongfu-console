@@ -115,8 +115,8 @@ export default function DashboardPage() {
           value={`¥${stats.monthExpenses.toLocaleString()}`}
           sub="较上月"
           trend="down"
-          color="text-[#7BA3C9]"
-          bgColor="bg-[#7BA3C9]/8"
+          color="text-[#87CEEB]"
+          bgColor="bg-[#87CEEB]/8"
         />
         <StatCard
           icon={ShoppingCart}
@@ -175,7 +175,7 @@ export default function DashboardPage() {
         <QuickAction icon={ShoppingCart} label="新建采购" href="/procurement" color="text-accent" bg="bg-accent/8" />
         <QuickAction icon={CalendarHeart} label="记录喂食" href="/feeding" color="text-primary" bg="bg-primary/8" />
         <QuickAction icon={HeartPulse} label="健康记录" href="/health" color="text-destructive" bg="bg-destructive/8" />
-        <QuickAction icon={Wallet} label="记一笔支出" href="/expenses" color="text-[#7BA3C9]" bg="bg-[#7BA3C9]/8" />
+        <QuickAction icon={Wallet} label="记一笔支出" href="/expenses" color="text-[#87CEEB]" bg="bg-[#87CEEB]/8" />
       </div>
     </div>
   );

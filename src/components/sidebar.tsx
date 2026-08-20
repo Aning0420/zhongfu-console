@@ -1,58 +1,36 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutDashboard,
-  ShoppingCart,
-  CalendarHeart,
-  HeartPulse,
-  Wallet,
-  MessageCircle,
-  ChevronLeft,
-  ChevronRight,
-  PawPrint,
-} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { href: '/', label: '总览', icon: LayoutDashboard },
-  { href: '/procurement', label: '采购总览', icon: ShoppingCart },
-  { href: '/feeding', label: '喂食日历', icon: CalendarHeart },
-  { href: '/health', label: '健康管理', icon: HeartPulse },
-  { href: '/expenses', label: '支出记账', icon: Wallet },
+  { href: '/', emoji: '🏠', label: '总览' },
+  { href: '/procurement', emoji: '📦', label: '采购' },
+  { href: '/feeding', emoji: '🍽️', label: '喂食' },
+  { href: '/health', emoji: '🏥', label: '健康' },
+  { href: '/expenses', emoji: '💰', label: '支出' },
 ];
 
 interface SidebarProps {
+  collapsed: boolean;
+  onToggle: () => void;
   onOpenChat: () => void;
 }
 
-export default function Sidebar({ onOpenChat }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle, onOpenChat }: SidebarProps) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <aside
-      className={cn(
-        'sticky top-0 z-40 h-screen shrink-0 bg-sidebar border-r border-border flex flex-col transition-all duration-300',
-        collapsed ? 'w-[68px]' : 'w-[220px]'
-      )}
-    >
+    <aside className="sticky top-0 z-40 h-screen w-[74px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col items-center">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 h-16 border-b border-border shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-          <PawPrint className="w-4.5 h-4.5 text-primary" />
-        </div>
-        {!collapsed && (
-          <span className="font-semibold text-[15px] text-foreground whitespace-nowrap">
-            钟福中控台
-          </span>
-        )}
+      <div className="flex items-center justify-center h-14 w-full border-b border-sidebar-border shrink-0">
+        <span className="text-xl">🐾</span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-3 px-2.5 space-y-1 overflow-y-auto">
+      <nav className="flex-1 flex flex-col items-center justify-center gap-1 py-4 w-full px-2">
         {navItems.map(item => {
           const isActive = pathname === item.href;
           return (
@@ -60,39 +38,60 @@ export default function Sidebar({ onOpenChat }: SidebarProps) {
               key={item.href}
               href={item.href}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 btn-press',
+                'flex flex-col items-center justify-center w-[58px] h-[54px] rounded-xl text-center transition-all duration-150 btn-press group',
                 isActive
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground'
+                  ? 'bg-accent/15 shadow-[0_1px_4px_rgba(135,206,235,0.15)]'
+                  : 'hover:bg-sidebar-accent'
               )}
+              title={item.label}
             >
-              <item.icon className={cn('w-[18px] h-[18px] shrink-0', isActive && 'text-primary')} />
-              {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
+              <span className="text-lg leading-none">{item.emoji}</span>
+              <span className={cn(
+                'text-[10px] mt-1 leading-none font-medium transition-colors',
+                isActive ? 'text-accent-foreground' : 'text-muted-foreground group-hover:text-foreground'
+              )}>
+                {item.label}
+              </span>
             </Link>
           );
         })}
       </nav>
 
       {/* Chat Button */}
-      <div className="px-2.5 pb-2">
-        <button
-          onClick={onOpenChat}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium w-full text-accent hover:bg-accent/10 transition-all duration-150 btn-press"
-        >
-          <MessageCircle className="w-[18px] h-[18px] shrink-0" />
-          {!collapsed && <span className="whitespace-nowrap">对话助手</span>}
-        </button>
-      </div>
+      <button
+        onClick={onOpenChat}
+        className="flex flex-col items-center justify-center w-[58px] h-[48px] rounded-xl hover:bg-secondary transition-all duration-150 btn-press mb-1"
+        title="对话助手"
+      >
+        <span className="text-lg leading-none">💬</span>
+        <span className="text-[10px] mt-1 leading-none font-medium text-muted-foreground">助手</span>
+      </button>
 
       {/* Collapse Toggle */}
-      <div className="px-2.5 pb-3 border-t border-border pt-2">
+      <div className="pb-3 pt-1 w-full flex justify-center border-t border-sidebar-border">
         <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center justify-center w-full py-2 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
+          onClick={onToggle}
+          className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
+          title="收起侧边栏"
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
       </div>
     </aside>
+  );
+}
+
+/* Floating Paw Button - shown when sidebar is collapsed */
+export function FloatingPawButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-accent/90 text-white shadow-[0_4px_16px_rgba(135,206,235,0.4)] flex items-center justify-center text-xl hover:scale-105 active:scale-95 transition-all duration-200 hover:shadow-[0_6px_20px_rgba(135,206,235,0.5)]"
+      title="展开侧边栏"
+    >
+      🐾
+    </button>
   );
 }

@@ -12,15 +12,15 @@ import { cn } from '@/lib/utils';
 import type { Expense } from '@/lib/store';
 
 const categoryColors: Record<string, string> = {
-  '主粮': '#6B9F7B',
-  '零食': '#D4915E',
-  '日用': '#7BA3C9',
-  '保健品': '#9B8EC9',
-  '玩具': '#C97070',
-  '医疗': '#E0935E',
-  '体检': '#5E9ECE',
-  '疫苗': '#6BC4A6',
-  '驱虫': '#C9A870',
+  '主粮': '#87CEEB',
+  '零食': '#FFB6C1',
+  '日用': '#B0E0E6',
+  '保健品': '#C9B1FF',
+  '玩具': '#E88888',
+  '医疗': '#F0B98A',
+  '体检': '#87CEEB',
+  '疫苗': '#98D8C8',
+  '驱虫': '#D4C5A0',
 };
 
 export default function ExpensesPage() {
@@ -76,8 +76,8 @@ export default function ExpensesPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card-warm p-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-[#7BA3C9]/8 flex items-center justify-center">
-              <Wallet className="w-4 h-4 text-[#7BA3C9]" />
+            <div className="w-8 h-8 rounded-lg bg-[#87CEEB]/8 flex items-center justify-center">
+              <Wallet className="w-4 h-4 text-[#87CEEB]" />
             </div>
             <span className="text-xs text-muted-foreground">本月总支出</span>
           </div>

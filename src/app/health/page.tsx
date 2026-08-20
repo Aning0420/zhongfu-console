@@ -66,8 +66,8 @@ export default function HealthPage() {
         </div>
         <div className="card-warm p-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-[#7BA3C9]/8 flex items-center justify-center">
-              <Pill className="w-4 h-4 text-[#7BA3C9]" />
+            <div className="w-8 h-8 rounded-lg bg-[#87CEEB]/8 flex items-center justify-center">
+              <Pill className="w-4 h-4 text-[#87CEEB]" />
             </div>
             <span className="text-xs text-muted-foreground">用药记录</span>
           </div>
@@ -129,8 +129,8 @@ export default function HealthPage() {
             <div key={record.id} className="card-warm p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#7BA3C9]/8 flex items-center justify-center shrink-0">
-                    <Pill className="w-4 h-4 text-[#7BA3C9]" />
+                  <div className="w-9 h-9 rounded-lg bg-[#87CEEB]/8 flex items-center justify-center shrink-0">
+                    <Pill className="w-4 h-4 text-[#87CEEB]" />
                   </div>
                   <div>
                     <p className="text-sm font-medium text-foreground">{record.title}</p>
@@ -191,7 +191,7 @@ function WeightChart({ records }: { records: HealthRecord[] }) {
             const val = (minW + range * ratio).toFixed(1);
             return (
               <g key={ratio}>
-                <line x1={padX} y1={y} x2={chartW - padX} y2={y} stroke="#EDEDEB" strokeWidth="1" />
+                <line x1={padX} y1={y} x2={chartW - padX} y2={y} stroke="#F0E8E6" strokeWidth="1" />
                 <text x={padX - 8} y={y + 4} textAnchor="end" className="text-[10px] fill-muted-foreground">{val}</text>
               </g>
             );
@@ -199,19 +199,19 @@ function WeightChart({ records }: { records: HealthRecord[] }) {
           {/* Area */}
           <path d={areaD} fill="url(#weightGradient)" opacity="0.3" />
           {/* Line */}
-          <path d={pathD} fill="none" stroke="#6B9F7B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={pathD} fill="none" stroke="#87CEEB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           {/* Points */}
           {points.map((p, i) => (
             <g key={i}>
-              <circle cx={p.x} cy={p.y} r="4" fill="#6B9F7B" stroke="white" strokeWidth="2" />
+              <circle cx={p.x} cy={p.y} r="4" fill="#87CEEB" stroke="white" strokeWidth="2" />
               <text x={p.x} y={p.y - 10} textAnchor="middle" className="text-[9px] fill-foreground font-medium">{p.weight}kg</text>
               <text x={p.x} y={padY + plotH + 16} textAnchor="middle" className="text-[9px] fill-muted-foreground">{p.date.slice(5)}</text>
             </g>
           ))}
           <defs>
             <linearGradient id="weightGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6B9F7B" stopOpacity="0.4" />
-              <stop offset="100%" stopColor="#6B9F7B" stopOpacity="0" />
+              <stop offset="0%" stopColor="#87CEEB" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="#87CEEB" stopOpacity="0" />
             </linearGradient>
           </defs>
         </svg>

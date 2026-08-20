@@ -14,7 +14,7 @@ import type { Order } from '@/lib/store';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
-  shipped: { label: '运输中', icon: Truck, color: 'text-[#7BA3C9] bg-[#7BA3C9]/10' },
+  shipped: { label: '运输中', icon: Truck, color: 'text-[#87CEEB] bg-[#87CEEB]/10' },
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
