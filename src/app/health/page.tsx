@@ -8,12 +8,12 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { HeartPulse, Plus, Stethoscope, Pill, Scale, TrendingUp } from 'lucide-react';
+import { HeartPulse, Plus, Stethoscope, Pill, Scale, TrendingUp, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { HealthRecord } from '@/lib/store';
 
 export default function HealthPage() {
-  const { state, addHealthRecord } = useAppContext();
+  const { state, addHealthRecord, deleteHealthRecord } = useAppContext();
   const [showAdd, setShowAdd] = useState(false);
 
   const visitRecords = useMemo(() =>
@@ -117,7 +117,16 @@ export default function HealthPage() {
                     )}
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground shrink-0">{record.date}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-muted-foreground">{record.date}</span>
+                  <button
+                    onClick={() => { if (confirm('确定删除该记录？')) deleteHealthRecord(record.id); }}
+                    className="w-6 h-6 rounded-full border border-destructive/30 text-destructive flex items-center justify-center hover:bg-destructive/10 transition-all"
+                    title="删除"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -137,7 +146,16 @@ export default function HealthPage() {
                     <p className="text-xs text-muted-foreground mt-1">{record.detail}</p>
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground shrink-0">{record.date}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-muted-foreground">{record.date}</span>
+                  <button
+                    onClick={() => { if (confirm('确定删除该记录？')) deleteHealthRecord(record.id); }}
+                    className="w-6 h-6 rounded-full border border-destructive/30 text-destructive flex items-center justify-center hover:bg-destructive/10 transition-all"
+                    title="删除"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}

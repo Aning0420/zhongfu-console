@@ -46,7 +46,7 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
 }
 
 export default function ProcurementPage() {
-  const { state, addOrder, updateOrderStatus, addExpense } = useAppContext();
+  const { state, addOrder, updateOrderStatus, deleteOrder, addExpense } = useAppContext();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAdd, setShowAdd] = useState(false);
@@ -368,16 +368,21 @@ export default function ProcurementPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {order.status === 'pending' && (
-                        <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'shipped')} className="text-xs h-7">
-                          标记发货
+                      <div className="flex items-center gap-1">
+                        {order.status === 'pending' && (
+                          <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'shipped')} className="text-xs h-7">
+                            标记发货
+                          </Button>
+                        )}
+                        {order.status === 'shipped' && (
+                          <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'delivered')} className="text-xs h-7 text-primary">
+                            确认到货
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="sm" onClick={() => { if (confirm('确定删除该订单？')) deleteOrder(order.id); }} className="text-xs h-7 text-destructive">
+                          删除
                         </Button>
-                      )}
-                      {order.status === 'shipped' && (
-                        <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'delivered')} className="text-xs h-7 text-primary">
-                          确认到货
-                        </Button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );

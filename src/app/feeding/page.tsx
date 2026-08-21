@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, TrendingUp, TrendingDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FeedingRecord } from '@/lib/store';
 
@@ -32,7 +32,7 @@ const eatingSpeedConfig = {
 };
 
 export default function FeedingPage() {
-  const { state, addFeedingRecord, toggleFeedingComplete } = useAppContext();
+  const { state, addFeedingRecord, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
 
@@ -185,17 +185,26 @@ export default function FeedingPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-foreground">{mealLabels[mealType]}</span>
                       {mealRecords.length > 0 && (
-                        <button
-                          onClick={() => toggleFeedingComplete(mealRecords[0].id)}
-                          className={cn(
-                            'w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
-                            mealRecords[0].completed
-                              ? 'bg-primary border-primary text-white'
-                              : 'border-border hover:border-primary'
-                          )}
-                        >
-                          {mealRecords[0].completed && <Check className="w-3 h-3" />}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => toggleFeedingComplete(mealRecords[0].id)}
+                            className={cn(
+                              'w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
+                              mealRecords[0].completed
+                                ? 'bg-primary border-primary text-white'
+                                : 'border-border hover:border-primary'
+                            )}
+                          >
+                            {mealRecords[0].completed && <Check className="w-3 h-3" />}
+                          </button>
+                          <button
+                            onClick={() => { if (confirm('确定删除该记录？')) deleteFeedingRecord(mealRecords[0].id); }}
+                            className="w-5 h-5 rounded-full border-2 border-destructive/30 text-destructive flex items-center justify-center hover:bg-destructive/10 transition-all"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       )}
                     </div>
                     {mealRecords.length > 0 ? (

@@ -7,10 +7,15 @@ interface AppContextType {
   state: AppState;
   addOrder: (order: Omit<Order, 'id'>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
+  deleteOrder: (id: string) => void;
   addFeedingRecord: (record: Omit<FeedingRecord, 'id'>) => void;
+  updateFeedingRecord: (id: string, record: Partial<FeedingRecord>) => void;
+  deleteFeedingRecord: (id: string) => void;
   toggleFeedingComplete: (id: string) => void;
   addHealthRecord: (record: Omit<HealthRecord, 'id'>) => void;
+  deleteHealthRecord: (id: string) => void;
   addExpense: (expense: Omit<Expense, 'id'>) => void;
+  deleteExpense: (id: string) => void;
   addChatMessages: (msgs: Omit<ChatMessage, 'id'>[]) => void;
   clearChatMessages: () => void;
 }
@@ -201,6 +206,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateInCloud('orders', id, { status });
   }, []);
 
+  const deleteOrder = useCallback((id: string) => {
+    setState(prev => ({ ...prev, orders: prev.orders.filter(o => o.id !== id) }));
+    deleteFromCloud('orders', id);
+  }, []);
+
   const addFeedingRecord = useCallback((record: Omit<FeedingRecord, 'id'>) => {
     const id = genId('f');
     const newRecord = { ...record, id };
@@ -216,6 +226,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       note: record.note,
       eating_speed: record.eatingSpeed || null,
     });
+  }, []);
+
+  const updateFeedingRecord = useCallback((id: string, updates: Partial<FeedingRecord>) => {
+    setState(prev => {
+      const record = prev.feedingRecords.find(r => r.id === id);
+      if (record) {
+        const cloudUpdates: Record<string, unknown> = {};
+        if (updates.date !== undefined) cloudUpdates.date = updates.date;
+        if (updates.mealType !== undefined) cloudUpdates.meal_type = updates.mealType;
+        if (updates.foodName !== undefined) cloudUpdates.food_name = updates.foodName;
+        if (updates.amount !== undefined) cloudUpdates.amount = updates.amount;
+        if (updates.completed !== undefined) cloudUpdates.completed = updates.completed;
+        if (updates.note !== undefined) cloudUpdates.note = updates.note;
+        if (updates.eatingSpeed !== undefined) cloudUpdates.eating_speed = updates.eatingSpeed;
+        updateInCloud('feeding_records', id, cloudUpdates);
+      }
+      return {
+        ...prev,
+        feedingRecords: prev.feedingRecords.map(r => r.id === id ? { ...r, ...updates } : r),
+      };
+    });
+  }, []);
+
+  const deleteFeedingRecord = useCallback((id: string) => {
+    setState(prev => ({ ...prev, feedingRecords: prev.feedingRecords.filter(r => r.id !== id) }));
+    deleteFromCloud('feeding_records', id);
   }, []);
 
   const toggleFeedingComplete = useCallback((id: string) => {
@@ -248,6 +284,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const deleteHealthRecord = useCallback((id: string) => {
+    setState(prev => ({ ...prev, healthRecords: prev.healthRecords.filter(r => r.id !== id) }));
+    deleteFromCloud('health_records', id);
+  }, []);
+
   const addExpense = useCallback((expense: Omit<Expense, 'id'>) => {
     const id = genId('e');
     const newExpense = { ...expense, id };
@@ -261,6 +302,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       description: expense.description,
       related_module: expense.relatedModule,
     });
+  }, []);
+
+  const deleteExpense = useCallback((id: string) => {
+    setState(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
+    deleteFromCloud('expenses', id);
   }, []);
 
   const addChatMessages = useCallback((msgs: Omit<ChatMessage, 'id'>[]) => {
@@ -300,7 +346,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, addFeedingRecord, toggleFeedingComplete, addHealthRecord, addExpense, addChatMessages, clearChatMessages }}>
+    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, deleteOrder, addFeedingRecord, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addHealthRecord, deleteHealthRecord, addExpense, deleteExpense, addChatMessages, clearChatMessages }}>
       {children}
     </AppContext.Provider>
   );

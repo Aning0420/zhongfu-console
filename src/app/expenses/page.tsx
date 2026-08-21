@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Wallet, Plus, TrendingUp, TrendingDown, PieChart } from 'lucide-react';
+import { Wallet, Plus, TrendingUp, TrendingDown, PieChart, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Expense } from '@/lib/store';
 
@@ -24,7 +24,7 @@ const categoryColors: Record<string, string> = {
 };
 
 export default function ExpensesPage() {
-  const { state, addExpense } = useAppContext();
+  const { state, addExpense, deleteExpense } = useAppContext();
   const [showAdd, setShowAdd] = useState(false);
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
 
@@ -141,7 +141,16 @@ export default function ExpensesPage() {
                     <p className="text-xs text-muted-foreground">{expense.category} · {expense.date}</p>
                   </div>
                 </div>
-                <span className="text-sm font-semibold text-foreground">¥{expense.amount.toLocaleString()}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-foreground">¥{expense.amount.toLocaleString()}</span>
+                  <button
+                    onClick={() => { if (confirm('确定删除该支出？')) deleteExpense(expense.id); }}
+                    className="w-6 h-6 rounded-full border border-destructive/30 text-destructive flex items-center justify-center hover:bg-destructive/10 transition-all"
+                    title="删除"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             ))}
             {filteredExpenses.length === 0 && (
