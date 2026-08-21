@@ -137,3 +137,30 @@ export function saveState(state: AppState): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
+
+/** Calculate average daily consumption for an item based on feeding records */
+export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[]): number {
+  const matches = feedingRecords.filter(r =>
+    r.foodName && (
+      r.foodName.toLowerCase().includes(itemName.toLowerCase()) ||
+      itemName.toLowerCase().includes(r.foodName.toLowerCase())
+    )
+  );
+  if (matches.length < 2) return 0;
+
+  const amounts = matches.map(r => {
+    const m = r.amount?.match(/([\d.]+)/);
+    return m ? parseFloat(m[1]) : 0;
+  }).filter(a => a > 0);
+  if (amounts.length < 2) return 0;
+
+  const dates = matches.map(r => new Date(r.date).getTime()).filter(t => !isNaN(t));
+  if (dates.length < 2) return 0;
+
+  const minDate = Math.min(...dates);
+  const maxDate = Math.max(...dates);
+  const days = Math.max(1, Math.ceil((maxDate - minDate) / (24 * 60 * 60 * 1000)));
+
+  const totalAmount = amounts.reduce((s, a) => s + a, 0);
+  return Math.round((totalAmount / days) * 100) / 100;
+}

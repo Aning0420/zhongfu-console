@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
+import { calcDailyUsage } from '@/lib/store';
 import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
@@ -21,36 +22,7 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
 
-/** Auto-calculate average daily consumption for a food item from feeding records */
-function calcDailyUsage(order: Order, feedingRecords: FeedingRecord[]): number {
-  // Find feeding records that match this order's item name
-  const matches = feedingRecords.filter(r =>
-    r.foodName && (
-      r.foodName.toLowerCase().includes(order.itemName.toLowerCase()) ||
-      order.itemName.toLowerCase().includes(r.foodName.toLowerCase())
-    )
-  );
-  if (matches.length < 2) return 0; // Need at least 2 records to calculate
-
-  // Parse amounts (e.g. "50g" -> 50, "1袋" -> 1)
-  const amounts = matches.map(r => {
-    const m = r.amount?.match(/([\d.]+)/);
-    return m ? parseFloat(m[1]) : 0;
-  }).filter(a => a > 0);
-  if (amounts.length < 2) return 0;
-
-  // Calculate date range
-  const dates = matches.map(r => new Date(r.date).getTime()).filter(t => !isNaN(t));
-  if (dates.length < 2) return 0;
-  const minDate = Math.min(...dates);
-  const maxDate = Math.max(...dates);
-  const days = Math.max(1, Math.ceil((maxDate - minDate) / (24 * 60 * 60 * 1000)));
-
-  // Average daily consumption
-  const totalAmount = amounts.reduce((s, a) => s + a, 0);
-  return Math.round((totalAmount / days) * 100) / 100;
-}
-
+/** Get depletion info for an order */
 function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } | null {
   if (!order.productionDate || !order.shelfLife) return null;
   const prod = new Date(order.productionDate);
@@ -65,7 +37,7 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
   if (remaining <= 0) return null;
   const dailyUsage = order.dailyUsage && order.dailyUsage > 0
     ? order.dailyUsage
-    : calcDailyUsage(order, feedingRecords);
+    : calcDailyUsage(order.itemName, feedingRecords);
   if (dailyUsage <= 0) return null;
   const daysLeft = Math.floor(remaining / dailyUsage);
   const depletion = new Date();

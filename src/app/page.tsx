@@ -8,14 +8,14 @@ import {
   HeartPulse,
   Wallet,
   TrendingDown,
-  TrendingUp,
   AlertCircle,
   CheckCircle2,
-  Clock,
-  PawPrint,
   MessageCircle,
+  RefreshCw,
+  Timer,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { calcDailyUsage } from '@/lib/store';
 
 export default function DashboardPage() {
   const { state } = useAppContext();
@@ -32,18 +32,6 @@ export default function DashboardPage() {
       .filter(e => e.date.startsWith(thisMonth))
       .reduce((sum, e) => sum + e.amount, 0);
 
-    const pendingOrders = state.orders.filter(o => o.status === 'pending' || o.status === 'shipped').length;
-
-    const lowStockItems = state.orders.filter(o => {
-      const remaining = o.quantity - o.consumed;
-      const ratio = remaining / o.quantity;
-      return ratio < 0.3 && o.status === 'delivered';
-    });
-
-    const latestWeight = [...state.healthRecords]
-      .filter(r => r.type === 'weight' && r.weight)
-      .sort((a, b) => b.date.localeCompare(a.date))[0];
-
     // Expiring items (within 7 days)
     const expiringItems = state.orders
       .map(order => {
@@ -58,7 +46,22 @@ export default function DashboardPage() {
       .filter((item): item is { itemName: string; daysLeft: number; expiryDate: string } => item !== null)
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
-    return { completedFeedings, totalFeedings, monthExpenses, pendingOrders, lowStockItems, latestWeight, expiringItems };
+    // Repurchase items (depletion within 7 days)
+    const repurchaseItems = state.orders
+      .filter(o => o.status === 'delivered')
+      .map(order => {
+        const dailyUsage = calcDailyUsage(order.itemName, state.feedingRecords);
+        if (!dailyUsage || dailyUsage <= 0) return null;
+        const remaining = order.quantity - order.consumed;
+        const daysLeft = Math.floor(remaining / dailyUsage);
+        if (daysLeft < 0 || daysLeft > 7) return null;
+        const depletionDate = new Date(new Date().getTime() + daysLeft * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        return { itemName: order.itemName, daysLeft, depletionDate, dailyUsage, remaining };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+
+    return { completedFeedings, totalFeedings, monthExpenses, expiringItems, repurchaseItems };
   }, [state]);
 
   const recentActivities = useMemo(() => {
@@ -109,7 +112,7 @@ export default function DashboardPage() {
           <p className="text-sm text-muted-foreground mt-1">这是钟福今天的状态概览</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/15">
-          <PawPrint className="w-4 h-4 text-primary" />
+          <CalendarHeart className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium text-primary">钟福状态良好</span>
         </div>
       </div>
@@ -134,44 +137,75 @@ export default function DashboardPage() {
           bgColor="bg-[#87CEEB]/8"
         />
         <StatCard
-          icon={ShoppingCart}
-          label="待处理订单"
-          value={String(stats.pendingOrders)}
-          sub="件进行中"
-          color="text-accent"
-          bgColor="bg-accent/8"
+          icon={RefreshCw}
+          label="回购提醒"
+          value={String(stats.repurchaseItems.length)}
+          sub="项即将耗尽"
+          color="text-[#D4915E]"
+          bgColor="bg-[#D4915E]/8"
         />
         <StatCard
-          icon={HeartPulse}
-          label="最新体重"
-          value={stats.latestWeight ? `${stats.latestWeight.weight}kg` : '--'}
-          sub={stats.latestWeight?.date || '暂无记录'}
-          color="text-destructive"
-          bgColor="bg-destructive/8"
+          icon={Timer}
+          label="到期提醒"
+          value={String(stats.expiringItems.length)}
+          sub="项即将过期"
+          color="text-[#E88888]"
+          bgColor="bg-[#E88888]/8"
         />
       </div>
 
-      {/* Alerts */}
-      {stats.lowStockItems.length > 0 && (
-        <div className="bg-accent/5 border border-accent/20 rounded-xl p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-accent shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-foreground">物资库存预警</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {stats.lowStockItems.map(i => i.itemName).join('、')} 库存不足，建议及时补货
-            </p>
+      {/* Repurchase Reminder */}
+      {stats.repurchaseItems.length > 0 && (
+        <div className="bg-[#D4915E]/5 border border-[#D4915E]/20 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <RefreshCw className="w-5 h-5 text-[#D4915E] shrink-0" />
+            <p className="text-sm font-semibold text-foreground">回购提醒</p>
+            <span className="text-xs text-muted-foreground">基于喂食记录自动计算消耗</span>
+          </div>
+          <div className="space-y-2">
+            {stats.repurchaseItems.map(item => (
+              <div key={item.itemName} className="flex items-center justify-between py-1.5 px-3 bg-white/60 rounded-lg">
+                <span className="text-sm font-medium text-foreground">{item.itemName}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    剩余 {item.remaining} · 日均 {item.dailyUsage.toFixed(1)}
+                  </span>
+                  <span className={cn(
+                    'text-xs font-medium px-2 py-0.5 rounded-full',
+                    item.daysLeft <= 3
+                      ? 'bg-[#E88888]/10 text-[#E88888]'
+                      : 'bg-[#D4915E]/10 text-[#D4915E]'
+                  )}>
+                    {item.daysLeft === 0 ? '今天耗尽' : `${item.daysLeft}天后耗尽`}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
+      {/* Expiry Reminder */}
       {stats.expiringItems.length > 0 && (
-        <div className="bg-[#E88888]/5 border border-[#E88888]/20 rounded-xl p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-[#E88888] shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-foreground">保质期到期提醒</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {stats.expiringItems.map(i => `${i.itemName}（${i.daysLeft === 0 ? '今天到期' : `还剩${i.daysLeft}天`}）`).join('、')}
-            </p>
+        <div className="bg-[#E88888]/5 border border-[#E88888]/20 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertCircle className="w-5 h-5 text-[#E88888] shrink-0" />
+            <p className="text-sm font-semibold text-foreground">保质期到期提醒</p>
+          </div>
+          <div className="space-y-2">
+            {stats.expiringItems.map(item => (
+              <div key={item.itemName} className="flex items-center justify-between py-1.5 px-3 bg-white/60 rounded-lg">
+                <span className="text-sm font-medium text-foreground">{item.itemName}</span>
+                <span className={cn(
+                  'text-xs font-medium px-2 py-0.5 rounded-full',
+                  item.daysLeft <= 3
+                    ? 'bg-[#E88888]/10 text-[#E88888]'
+                    : 'bg-[#E88888]/10 text-[#E88888]'
+                )}>
+                  {item.daysLeft === 0 ? '今天到期' : `还剩${item.daysLeft}天`}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -239,7 +273,6 @@ function StatCard({
       <p className="text-2xl font-bold text-foreground">{value}</p>
       <div className="flex items-center gap-1 mt-1">
         {trend === 'down' && <TrendingDown className="w-3 h-3 text-primary" />}
-        {trend === 'up' && <TrendingUp className="w-3 h-3 text-destructive" />}
         <span className="text-xs text-muted-foreground">{sub}</span>
       </div>
     </div>
@@ -263,11 +296,13 @@ function QuickAction({
     <a
       href={href}
       className={cn(
-        'flex items-center gap-3 p-3.5 rounded-xl border border-border bg-card hover:shadow-md transition-all duration-200 btn-press'
+        'flex items-center gap-2 p-3 rounded-xl border transition-all duration-200',
+        'hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98]',
+        'border-border bg-card'
       )}
     >
-      <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center', bg)}>
-        <Icon className={cn('w-4.5 h-4.5', color)} />
+      <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center', bg)}>
+        <Icon className={cn('w-4 h-4', color)} />
       </div>
       <span className="text-sm font-medium text-foreground">{label}</span>
     </a>
@@ -276,61 +311,41 @@ function QuickAction({
 
 function RecentChatSection() {
   const { state } = useAppContext();
+  const [showAll, setShowAll] = useState(false);
 
-  // Get user messages (questions) with their assistant replies, most recent first
-  const conversations = useMemo(() => {
-    const msgs = state.chatMessages.filter(m => m.role === 'user');
-    const allMsgs = state.chatMessages;
-    return msgs
-      .map((userMsg, idx) => {
-        // Find the assistant reply that follows this user message
-        const userIndex = allMsgs.findIndex(m => m.id === userMsg.id);
-        const reply = userIndex >= 0 && userIndex < allMsgs.length - 1 && allMsgs[userIndex + 1].role === 'assistant'
-          ? allMsgs[userIndex + 1]
-          : null;
-        return { user: userMsg, reply };
-      })
-      .reverse()
-      .slice(0, 5);
+  const recentMessages = useMemo(() => {
+    const userMessages = state.chatMessages.filter((m: { role: string }) => m.role === 'user');
+    return userMessages.slice(-5).reverse();
   }, [state.chatMessages]);
 
-  if (conversations.length === 0) return null;
-
-  const formatTime = (ts: string) => {
-    try {
-      const d = new Date(ts);
-      const now = new Date();
-      if (d.toDateString() === now.toDateString()) {
-        return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-      }
-      return `${d.getMonth() + 1}/${d.getDate()}`;
-    } catch {
-      return '';
-    }
-  };
+  if (recentMessages.length === 0) return null;
 
   return (
     <div className="card-warm p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <MessageCircle className="w-4 h-4 text-accent" />
-        <h2 className="text-base font-semibold text-foreground">最近对话</h2>
-        <span className="text-xs text-muted-foreground ml-auto">{state.chatMessages.filter(m => m.role === 'user').length} 条对话</span>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+          <MessageCircle className="w-4 h-4 text-primary" />
+          最近对话
+        </h2>
+        {recentMessages.length > 3 && (
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="text-xs text-primary hover:underline"
+          >
+            {showAll ? '收起' : '展开'}
+          </button>
+        )}
       </div>
-      <div className="space-y-3">
-        {conversations.map(({ user, reply }) => (
-          <div key={user.id} className="flex items-start gap-3 py-1.5">
-            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
-              <MessageCircle className="w-4 h-4 text-accent" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium text-foreground truncate">{user.content}</p>
-              </div>
-              {reply && (
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">{reply.content.split('\n')[0]}</p>
-              )}
-            </div>
-            <span className="text-xs text-muted-foreground shrink-0">{formatTime(user.timestamp)}</span>
+      <div className="space-y-2">
+        {(showAll ? recentMessages : recentMessages.slice(0, 3)).map((msg: { id: string; content: string; timestamp: string; synced_data?: unknown }) => (
+          <div key={msg.id} className="flex items-start gap-2 py-1.5 px-3 bg-muted/30 rounded-lg">
+            <span className="text-xs text-muted-foreground shrink-0 mt-0.5">
+              {new Date(msg.timestamp).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}
+            </span>
+            <p className="text-sm text-foreground truncate flex-1">{msg.content}</p>
+            {msg.synced_data != null && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">已同步</span>
+            )}
           </div>
         ))}
       </div>
