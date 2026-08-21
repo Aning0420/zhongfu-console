@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
-import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar } from 'lucide-react';
+import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order } from '@/lib/store';
 
@@ -28,6 +28,16 @@ function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } |
   const now = new Date();
   const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
   return { daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
+}
+
+function getDepletionInfo(order: Order): { daysLeft: number; depletionDate: string } | null {
+  if (!order.dailyUsage || order.dailyUsage <= 0) return null;
+  const remaining = order.quantity - order.consumed;
+  if (remaining <= 0) return null;
+  const daysLeft = Math.floor(remaining / order.dailyUsage);
+  const depletion = new Date();
+  depletion.setDate(depletion.getDate() + daysLeft);
+  return { daysLeft, depletionDate: depletion.toISOString().split('T')[0] };
 }
 
 export default function ProcurementPage() {
@@ -55,6 +65,19 @@ export default function ProcurementPage() {
         return { order, ...info };
       })
       .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && item.daysLeft >= 0 && item.order.status === 'delivered')
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [state.orders]);
+
+  // Items needing repurchase within 7 days (based on consumption speed)
+  const repurchaseItems = useMemo(() => {
+    return state.orders
+      .filter(o => o.status === 'delivered')
+      .map(order => {
+        const info = getDepletionInfo(order);
+        if (!info) return null;
+        return { order, ...info };
+      })
+      .filter((item): item is { order: Order; daysLeft: number; depletionDate: string } => item !== null && item.daysLeft <= 7)
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [state.orders]);
 
@@ -102,6 +125,35 @@ export default function ProcurementPage() {
                   <span className="text-xs text-muted-foreground">到期 {expiryDate}</span>
                   <Badge className={cn('text-xs', daysLeft <= 3 ? 'bg-[#E88888] text-white' : 'bg-[#E88888]/20 text-[#E88888]')}>
                     {daysLeft === 0 ? '今天到期' : `还剩 ${daysLeft} 天`}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Repurchase Reminder */}
+      {repurchaseItems.length > 0 && (
+        <div className="card-warm border-l-4 border-l-accent p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingDown className="w-4 h-4 text-accent" />
+            <h3 className="font-semibold text-foreground text-sm">回购提醒</h3>
+            <Badge variant="secondary" className="bg-accent/10 text-accent text-xs">{repurchaseItems.length} 项即将耗尽</Badge>
+          </div>
+          <div className="space-y-2">
+            {repurchaseItems.map(({ order, daysLeft, depletionDate }) => (
+              <div key={order.id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-accent/5">
+                <div className="flex items-center gap-2">
+                  <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{order.itemName}</span>
+                  <span className="text-xs text-muted-foreground">剩余 {order.quantity - order.consumed}{order.unit}</span>
+                  <span className="text-xs text-muted-foreground">· 日均消耗 {order.dailyUsage}{order.unit}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">预计 {depletionDate} 耗尽</span>
+                  <Badge className={cn('text-xs', daysLeft <= 3 ? 'bg-accent text-white' : 'bg-accent/20 text-accent')}>
+                    {daysLeft === 0 ? '今天耗尽' : `还剩 ${daysLeft} 天`}
                   </Badge>
                 </div>
               </div>
@@ -158,6 +210,7 @@ export default function ProcurementPage() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">采购时间</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">生产日期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">保质期</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">预计耗尽</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">状态</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">操作</th>
               </tr>
@@ -208,6 +261,23 @@ export default function ProcurementPage() {
                       ) : '-'}
                     </td>
                     <td className="px-4 py-3">
+                      {(() => {
+                        const depletion = getDepletionInfo(order);
+                        if (!depletion) return <span className="text-muted-foreground text-xs">-</span>;
+                        return (
+                          <div className="flex items-center gap-1">
+                            <TrendingDown className="w-3 h-3 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">{depletion.depletionDate}</span>
+                            {depletion.daysLeft <= 7 && (
+                              <Badge className="ml-1 text-[10px] px-1 py-0 bg-accent/15 text-accent border-0">
+                                {depletion.daysLeft === 0 ? '今天' : `${depletion.daysLeft}天`}
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', st.color)}>
                         <st.icon className="w-3 h-3" />
                         {st.label}
@@ -251,7 +321,7 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
 function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
     itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', syncExpense: true,
+    productionDate: '', shelfLife: '', dailyUsage: '', syncExpense: true,
     purchaseDate: new Date().toISOString().split('T')[0],
   });
 
@@ -270,6 +340,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
       supplier: form.supplier,
       productionDate: form.productionDate || undefined,
       shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
+      dailyUsage: form.dailyUsage ? Number(form.dailyUsage) : undefined,
     });
     if (form.syncExpense && totalAmount > 0) {
       addExpense({
@@ -337,6 +408,11 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Label>保质期(天)</Label>
             <Input type="number" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：365" />
           </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>日均消耗量</Label>
+          <Input type="number" step="0.01" value={form.dailyUsage} onChange={e => setForm(p => ({ ...p, dailyUsage: e.target.value }))} placeholder={`如：0.1（${form.unit || '单位'}/天）`} />
+          <p className="text-xs text-muted-foreground">用于预估库存耗尽时间，提前7天提醒回购</p>
         </div>
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5">
           <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={v => setForm(p => ({ ...p, syncExpense: !!v }))} />

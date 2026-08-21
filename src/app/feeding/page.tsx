@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FeedingRecord } from '@/lib/store';
 
@@ -23,6 +23,12 @@ const mealLabels = {
   lunch: '午餐',
   dinner: '晚餐',
   snack: '零食',
+};
+
+const eatingSpeedConfig = {
+  fast: { label: '爱吃', icon: Zap, color: 'text-primary', bg: 'bg-primary/10', emoji: '😋' },
+  normal: { label: '正常', icon: Minus, color: 'text-accent', bg: 'bg-accent/10', emoji: '😐' },
+  slow: { label: '挑食', icon: Snail, color: 'text-[#E88888]', bg: 'bg-[#E88888]/10', emoji: '😒' },
 };
 
 export default function FeedingPage() {
@@ -194,9 +200,16 @@ export default function FeedingPage() {
                     </div>
                     {mealRecords.length > 0 ? (
                       <div className="mt-1">
-                        <p className="text-xs text-muted-foreground">
-                          {mealRecords[0].foodName} · {mealRecords[0].amount}
-                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs text-muted-foreground">
+                            {mealRecords[0].foodName} · {mealRecords[0].amount}
+                          </p>
+                          {mealRecords[0].eatingSpeed && (
+                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', eatingSpeedConfig[mealRecords[0].eatingSpeed].bg, eatingSpeedConfig[mealRecords[0].eatingSpeed].color)}>
+                              {eatingSpeedConfig[mealRecords[0].eatingSpeed].emoji} {eatingSpeedConfig[mealRecords[0].eatingSpeed].label}
+                            </span>
+                          )}
+                        </div>
                         {mealRecords[0].note && (
                           <p className="text-xs text-muted-foreground/70 mt-0.5">{mealRecords[0].note}</p>
                         )}
@@ -228,6 +241,65 @@ export default function FeedingPage() {
               </div>
             </div>
           </div>
+
+          {/* Food Preference Ranking */}
+          <div className="mt-5 pt-4 border-t border-border/50">
+            <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-1.5">
+              <Heart className="w-3.5 h-3.5 text-primary" /> 食物喜好排行
+            </h3>
+            {(() => {
+              const foodMap: Record<string, { fast: number; normal: number; slow: number }> = {};
+              state.feedingRecords.forEach(r => {
+                if (!r.eatingSpeed) return;
+                if (!foodMap[r.foodName]) foodMap[r.foodName] = { fast: 0, normal: 0, slow: 0 };
+                foodMap[r.foodName][r.eatingSpeed]++;
+              });
+              const foodList = Object.entries(foodMap).map(([name, counts]) => {
+                const total = counts.fast + counts.normal + counts.slow;
+                const score = (counts.fast * 2 + counts.normal * 1) / (total * 2);
+                const preference: 'fast' | 'normal' | 'slow' = counts.fast > counts.slow ? 'fast' : counts.slow > counts.fast ? 'slow' : 'normal';
+                return { name, ...counts, total, score, preference };
+              }).sort((a, b) => b.score - a.score);
+
+              if (foodList.length === 0) return <p className="text-xs text-muted-foreground/60">暂无数据</p>;
+
+              return (
+                <div className="space-y-2">
+                  {foodList.map(food => {
+                    const config = eatingSpeedConfig[food.preference];
+                    return (
+                      <div key={food.name} className="flex items-center gap-2 p-2 rounded-lg bg-muted/20">
+                        <span className="text-sm">{config.emoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-foreground truncate">{food.name}</span>
+                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', config.bg, config.color)}>
+                              {config.label}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 mt-1">
+                            <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                              <div className="h-full flex">
+                                <div className="bg-primary" style={{ width: `${(food.fast / food.total) * 100}%` }} />
+                                <div className="bg-accent" style={{ width: `${(food.normal / food.total) * 100}%` }} />
+                                <div className="bg-[#E88888]" style={{ width: `${(food.slow / food.total) * 100}%` }} />
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground">{food.total}次</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center gap-3 pt-2 text-[10px] text-muted-foreground">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary" />爱吃</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent" />正常</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#E88888]" />挑食</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         </div>
       </div>
     </div>
@@ -241,6 +313,7 @@ function AddFeedingDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (rec
     foodName: '',
     amount: '',
     note: '',
+    eatingSpeed: 'normal' as FeedingRecord['eatingSpeed'],
   });
 
   const handleSubmit = () => {
@@ -281,6 +354,31 @@ function AddFeedingDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (rec
           <div className="space-y-1.5">
             <Label>用量</Label>
             <Input value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} placeholder="如：50g" />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>进食速度 / 喜好程度</Label>
+          <div className="grid grid-cols-3 gap-2">
+            {(['fast', 'normal', 'slow'] as const).map(speed => {
+              const config = eatingSpeedConfig[speed];
+              const Icon = config.icon;
+              return (
+                <button
+                  key={speed}
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, eatingSpeed: speed }))}
+                  className={cn(
+                    'flex items-center justify-center gap-1.5 p-2.5 rounded-lg border-2 transition-all text-sm',
+                    form.eatingSpeed === speed
+                      ? `${config.bg} border-current ${config.color}`
+                      : 'border-border/50 hover:border-border text-muted-foreground'
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{config.emoji} {config.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="space-y-1.5">
