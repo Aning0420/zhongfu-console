@@ -458,7 +458,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Select value={form.category} onValueChange={v => setForm(p => ({ ...p, category: v }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {['主粮', '零食', '日用', '保健品', '玩具', '医疗'].map(c => (
+                {['干粮', '湿粮', '零食', '保健品', '药品', '用品', '玩具'].map(c => (
                   <SelectItem key={c} value={c}>{c}</SelectItem>
                 ))}
               </SelectContent>
@@ -487,27 +487,29 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Input type="number" value={form.unitPrice} onChange={e => setForm(p => ({ ...p, unitPrice: e.target.value }))} placeholder="0" />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>生产日期</Label>
-            <Input type="date" value={form.productionDate} onChange={e => setForm(p => ({ ...p, productionDate: e.target.value }))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>保质期</Label>
-            <div className="flex gap-2">
-              <Input type="number" className="flex-1" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：30" />
-              <select
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                value={form.shelfLifeUnit}
-                onChange={e => setForm(p => ({ ...p, shelfLifeUnit: e.target.value as 'day' | 'month' | 'year' }))}
-              >
-                <option value="day">天</option>
-                <option value="month">月</option>
-                <option value="year">年</option>
-              </select>
+        {form.category !== '用品' && form.category !== '玩具' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>生产日期</Label>
+              <Input type="date" value={form.productionDate} onChange={e => setForm(p => ({ ...p, productionDate: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>保质期</Label>
+              <div className="flex gap-2">
+                <Input type="number" className="flex-1" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：30" />
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  value={form.shelfLifeUnit}
+                  onChange={e => setForm(p => ({ ...p, shelfLifeUnit: e.target.value as 'day' | 'month' | 'year' }))}
+                >
+                  <option value="day">天</option>
+                  <option value="month">月</option>
+                  <option value="year">年</option>
+                </select>
             </div>
           </div>
         </div>
+        )}
         <div className="rounded-lg bg-primary/5 px-3 py-2.5">
           <p className="text-xs text-muted-foreground">💡 日均消耗量将根据喂食记录自动学习计算，无需手动填写。喂食记录越多，估算越准确。</p>
         </div>
