@@ -8,12 +8,13 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 import { HeartPulse, Plus, Stethoscope, Pill, Scale, TrendingUp, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { HealthRecord } from '@/lib/store';
+import type { HealthRecord, Expense } from '@/lib/store';
 
 export default function HealthPage() {
-  const { state, addHealthRecord, deleteHealthRecord } = useAppContext();
+  const { state, addHealthRecord, deleteHealthRecord, addExpense } = useAppContext();
   const [showAdd, setShowAdd] = useState(false);
 
   const visitRecords = useMemo(() =>
@@ -49,7 +50,7 @@ export default function HealthPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 新增记录
             </Button>
           </DialogTrigger>
-          <AddHealthDialog onClose={() => setShowAdd(false)} onAdd={addHealthRecord} />
+          <AddHealthDialog onClose={() => setShowAdd(false)} onAdd={addHealthRecord} addExpense={addExpense} />
         </Dialog>
       </div>
 
@@ -244,7 +245,7 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-function AddHealthDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (record: Omit<HealthRecord, 'id'>) => void }) {
+function AddHealthDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (record: Omit<HealthRecord, 'id'>) => void; addExpense?: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
     type: 'visit' as HealthRecord['type'],
@@ -253,6 +254,8 @@ function AddHealthDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (reco
     weight: '',
     hospital: '',
     doctor: '',
+    amount: '',
+    syncExpense: true,
   });
 
   const handleSubmit = () => {
@@ -266,6 +269,15 @@ function AddHealthDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (reco
       hospital: form.hospital || undefined,
       doctor: form.doctor || undefined,
     });
+    if (form.syncExpense && form.amount && Number(form.amount) > 0 && addExpense) {
+      addExpense({
+        date: form.date,
+        category: 'medical',
+        amount: Number(form.amount),
+        description: `${form.title}${form.detail ? ' - ' + form.detail : ''}`,
+        relatedModule: 'health',
+      });
+    }
     onClose();
   };
 
@@ -307,16 +319,26 @@ function AddHealthDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (reco
           </div>
         )}
         {form.type === 'visit' && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>医院</Label>
-              <Input value={form.hospital} onChange={e => setForm(p => ({ ...p, hospital: e.target.value }))} placeholder="医院名称" />
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>医院</Label>
+                <Input value={form.hospital} onChange={e => setForm(p => ({ ...p, hospital: e.target.value }))} placeholder="医院名称" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>医生</Label>
+                <Input value={form.doctor} onChange={e => setForm(p => ({ ...p, doctor: e.target.value }))} placeholder="医生姓名" />
+              </div>
             </div>
             <div className="space-y-1.5">
-              <Label>医生</Label>
-              <Input value={form.doctor} onChange={e => setForm(p => ({ ...p, doctor: e.target.value }))} placeholder="医生姓名" />
+              <Label>金额 (¥)</Label>
+              <Input type="number" step="0.01" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} placeholder="如：500" />
             </div>
-          </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={checked => setForm(p => ({ ...p, syncExpense: checked === true }))} />
+              <Label htmlFor="sync-expense" className="text-sm cursor-pointer">同步记录到支出记账</Label>
+            </div>
+          </>
         )}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>取消</Button>

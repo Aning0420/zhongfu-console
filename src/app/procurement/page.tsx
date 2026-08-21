@@ -432,7 +432,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
     });
     if (form.syncExpense && totalAmount > 0) {
       addExpense({
-        date: new Date().toISOString().split('T')[0],
+        date: form.purchaseDate || new Date().toISOString().split('T')[0],
         category: form.category,
         amount: totalAmount,
         description: `采购${form.itemName}`,
