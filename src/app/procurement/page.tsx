@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock } from 'lucide-react';
+import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order } from '@/lib/store';
 
@@ -18,6 +18,15 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
+
+function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } | null {
+  if (!order.productionDate || !order.shelfLife) return null;
+  const prod = new Date(order.productionDate);
+  const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  return { daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
+}
 
 export default function ProcurementPage() {
   const { state, addOrder, updateOrderStatus } = useAppContext();
@@ -34,6 +43,18 @@ export default function ProcurementPage() {
       })
       .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate));
   }, [state.orders, search, statusFilter]);
+
+  // Items expiring within 7 days
+  const expiringItems = useMemo(() => {
+    return state.orders
+      .map(order => {
+        const info = getExpiryInfo(order);
+        if (!info) return null;
+        return { order, ...info };
+      })
+      .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && item.daysLeft >= 0 && item.order.status === 'delivered')
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [state.orders]);
 
   const summary = useMemo(() => {
     const total = state.orders.reduce((s, o) => s + o.quantity * o.unitPrice, 0);
@@ -58,6 +79,34 @@ export default function ProcurementPage() {
           <AddOrderDialog onClose={() => setShowAdd(false)} onAdd={addOrder} />
         </Dialog>
       </div>
+
+      {/* Expiry Reminder */}
+      {expiringItems.length > 0 && (
+        <div className="card-warm border-l-4 border-l-[#E88888] p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-4 h-4 text-[#E88888]" />
+            <h3 className="font-semibold text-foreground text-sm">保质期提醒</h3>
+            <Badge variant="secondary" className="bg-[#E88888]/10 text-[#E88888] text-xs">{expiringItems.length} 项即将到期</Badge>
+          </div>
+          <div className="space-y-2">
+            {expiringItems.map(({ order, daysLeft, expiryDate }) => (
+              <div key={order.id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-[#E88888]/5">
+                <div className="flex items-center gap-2">
+                  <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">{order.itemName}</span>
+                  <span className="text-xs text-muted-foreground">{order.quantity - order.consumed}{order.unit} 剩余</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">到期 {expiryDate}</span>
+                  <Badge className={cn('text-xs', daysLeft <= 3 ? 'bg-[#E88888] text-white' : 'bg-[#E88888]/20 text-[#E88888]')}>
+                    {daysLeft === 0 ? '今天到期' : `还剩 ${daysLeft} 天`}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -104,7 +153,8 @@ export default function ProcurementPage() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">库存</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">单价</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">供应商</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">日期</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">生产日期</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">保质期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">状态</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">操作</th>
               </tr>
@@ -114,6 +164,7 @@ export default function ProcurementPage() {
                 const remaining = order.quantity - order.consumed;
                 const ratio = remaining / order.quantity;
                 const st = statusMap[order.status];
+                const expiry = getExpiryInfo(order);
                 return (
                   <tr key={order.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
@@ -138,7 +189,20 @@ export default function ProcurementPage() {
                     </td>
                     <td className="px-4 py-3 text-foreground">¥{order.unitPrice}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.supplier}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{order.purchaseDate}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{order.productionDate || '-'}</td>
+                    <td className="px-4 py-3">
+                      {order.shelfLife ? (
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-muted-foreground" />
+                          <span className="text-muted-foreground">{order.shelfLife}天</span>
+                          {expiry && expiry.daysLeft <= 7 && expiry.daysLeft >= 0 && (
+                            <Badge className="ml-1 text-[10px] px-1 py-0 bg-[#E88888]/15 text-[#E88888] border-0">
+                              {expiry.daysLeft === 0 ? '今天' : `${expiry.daysLeft}天`}
+                            </Badge>
+                          )}
+                        </div>
+                      ) : '-'}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', st.color)}>
                         <st.icon className="w-3 h-3" />
@@ -183,6 +247,7 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
 function AddOrderDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void }) {
   const [form, setForm] = useState({
     itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
+    productionDate: '', shelfLife: '',
   });
 
   const handleSubmit = () => {
@@ -197,12 +262,14 @@ function AddOrderDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (order
       status: 'pending',
       consumed: 0,
       supplier: form.supplier,
+      productionDate: form.productionDate || undefined,
+      shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
     });
     onClose();
   };
 
   return (
-    <DialogContent className="sm:max-w-[440px]">
+    <DialogContent className="sm:max-w-[480px]">
       <DialogHeader>
         <DialogTitle>新建采购订单</DialogTitle>
       </DialogHeader>
@@ -240,6 +307,16 @@ function AddOrderDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (order
           <div className="space-y-1.5">
             <Label>单价(¥)</Label>
             <Input type="number" value={form.unitPrice} onChange={e => setForm(p => ({ ...p, unitPrice: e.target.value }))} placeholder="0" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>生产日期</Label>
+            <Input type="date" value={form.productionDate} onChange={e => setForm(p => ({ ...p, productionDate: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>保质期(天)</Label>
+            <Input type="number" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：365" />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-2">

@@ -44,7 +44,21 @@ export default function DashboardPage() {
       .filter(r => r.type === 'weight' && r.weight)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
 
-    return { completedFeedings, totalFeedings, monthExpenses, pendingOrders, lowStockItems, latestWeight };
+    // Expiring items (within 7 days)
+    const expiringItems = state.orders
+      .map(order => {
+        if (!order.productionDate || !order.shelfLife || order.status !== 'delivered') return null;
+        const prod = new Date(order.productionDate);
+        const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
+        const now = new Date();
+        const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+        if (daysLeft < 0 || daysLeft > 7) return null;
+        return { itemName: order.itemName, daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
+      })
+      .filter((item): item is { itemName: string; daysLeft: number; expiryDate: string } => item !== null)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+
+    return { completedFeedings, totalFeedings, monthExpenses, pendingOrders, lowStockItems, latestWeight, expiringItems };
   }, [state]);
 
   const recentActivities = useMemo(() => {
@@ -145,6 +159,18 @@ export default function DashboardPage() {
             <p className="text-sm font-medium text-foreground">物资库存预警</p>
             <p className="text-sm text-muted-foreground mt-1">
               {stats.lowStockItems.map(i => i.itemName).join('、')} 库存不足，建议及时补货
+            </p>
+          </div>
+        </div>
+      )}
+
+      {stats.expiringItems.length > 0 && (
+        <div className="bg-[#E88888]/5 border border-[#E88888]/20 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-[#E88888] shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-foreground">保质期到期提醒</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {stats.expiringItems.map(i => `${i.itemName}（${i.daysLeft === 0 ? '今天到期' : `还剩${i.daysLeft}天`}）`).join('、')}
             </p>
           </div>
         </div>
