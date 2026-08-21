@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Order } from '@/lib/store';
+import type { Order, FeedingRecord } from '@/lib/store';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -20,6 +20,36 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
+
+/** Auto-calculate average daily consumption for a food item from feeding records */
+function calcDailyUsage(order: Order, feedingRecords: FeedingRecord[]): number {
+  // Find feeding records that match this order's item name
+  const matches = feedingRecords.filter(r =>
+    r.foodName && (
+      r.foodName.toLowerCase().includes(order.itemName.toLowerCase()) ||
+      order.itemName.toLowerCase().includes(r.foodName.toLowerCase())
+    )
+  );
+  if (matches.length < 2) return 0; // Need at least 2 records to calculate
+
+  // Parse amounts (e.g. "50g" -> 50, "1袋" -> 1)
+  const amounts = matches.map(r => {
+    const m = r.amount?.match(/([\d.]+)/);
+    return m ? parseFloat(m[1]) : 0;
+  }).filter(a => a > 0);
+  if (amounts.length < 2) return 0;
+
+  // Calculate date range
+  const dates = matches.map(r => new Date(r.date).getTime()).filter(t => !isNaN(t));
+  if (dates.length < 2) return 0;
+  const minDate = Math.min(...dates);
+  const maxDate = Math.max(...dates);
+  const days = Math.max(1, Math.ceil((maxDate - minDate) / (24 * 60 * 60 * 1000)));
+
+  // Average daily consumption
+  const totalAmount = amounts.reduce((s, a) => s + a, 0);
+  return Math.round((totalAmount / days) * 100) / 100;
+}
 
 function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } | null {
   if (!order.productionDate || !order.shelfLife) return null;
@@ -30,14 +60,17 @@ function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } |
   return { daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
 }
 
-function getDepletionInfo(order: Order): { daysLeft: number; depletionDate: string } | null {
-  if (!order.dailyUsage || order.dailyUsage <= 0) return null;
+function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { daysLeft: number; depletionDate: string; dailyUsage: number } | null {
   const remaining = order.quantity - order.consumed;
   if (remaining <= 0) return null;
-  const daysLeft = Math.floor(remaining / order.dailyUsage);
+  const dailyUsage = order.dailyUsage && order.dailyUsage > 0
+    ? order.dailyUsage
+    : calcDailyUsage(order, feedingRecords);
+  if (dailyUsage <= 0) return null;
+  const daysLeft = Math.floor(remaining / dailyUsage);
   const depletion = new Date();
   depletion.setDate(depletion.getDate() + daysLeft);
-  return { daysLeft, depletionDate: depletion.toISOString().split('T')[0] };
+  return { daysLeft, depletionDate: depletion.toISOString().split('T')[0], dailyUsage };
 }
 
 export default function ProcurementPage() {
@@ -73,13 +106,13 @@ export default function ProcurementPage() {
     return state.orders
       .filter(o => o.status === 'delivered')
       .map(order => {
-        const info = getDepletionInfo(order);
+        const info = getDepletionInfo(order, state.feedingRecords);
         if (!info) return null;
         return { order, ...info };
       })
-      .filter((item): item is { order: Order; daysLeft: number; depletionDate: string } => item !== null && item.daysLeft <= 7)
+      .filter((item): item is NonNullable<typeof item> => item !== null && item.daysLeft <= 7)
       .sort((a, b) => a.daysLeft - b.daysLeft);
-  }, [state.orders]);
+  }, [state.orders, state.feedingRecords]);
 
   // Food preference analysis from feeding records
   const foodPreferences = useMemo(() => {
@@ -168,13 +201,13 @@ export default function ProcurementPage() {
             <Badge variant="secondary" className="bg-accent/10 text-accent text-xs">{repurchaseItems.length} 项即将耗尽</Badge>
           </div>
           <div className="space-y-2">
-            {repurchaseItems.map(({ order, daysLeft, depletionDate }) => (
+            {repurchaseItems.map(({ order, daysLeft, depletionDate, dailyUsage }) => (
               <div key={order.id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-accent/5">
                 <div className="flex items-center gap-2">
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">{order.itemName}</span>
                   <span className="text-xs text-muted-foreground">剩余 {order.quantity - order.consumed}{order.unit}</span>
-                  <span className="text-xs text-muted-foreground">· 日均消耗 {order.dailyUsage}{order.unit}</span>
+                  <span className="text-xs text-muted-foreground">· 日均消耗 {dailyUsage}{order.unit}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">预计 {depletionDate} 耗尽</span>
@@ -341,7 +374,7 @@ export default function ProcurementPage() {
                     </td>
                     <td className="px-4 py-3">
                       {(() => {
-                        const depletion = getDepletionInfo(order);
+                        const depletion = getDepletionInfo(order, state.feedingRecords);
                         if (!depletion) return <span className="text-muted-foreground text-xs">-</span>;
                         return (
                           <div className="flex items-center gap-1">
@@ -400,7 +433,7 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
 function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
     itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', dailyUsage: '', syncExpense: true,
+    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', syncExpense: true,
     purchaseDate: new Date().toISOString().split('T')[0],
   });
 
@@ -419,7 +452,6 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
       supplier: form.supplier,
       productionDate: form.productionDate || undefined,
       shelfLife: form.shelfLife ? (form.shelfLifeUnit === 'year' ? Number(form.shelfLife) * 365 : form.shelfLifeUnit === 'month' ? Number(form.shelfLife) * 30 : Number(form.shelfLife)) : undefined,
-      dailyUsage: form.dailyUsage ? Number(form.dailyUsage) : undefined,
     });
     if (form.syncExpense && totalAmount > 0) {
       addExpense({
@@ -499,10 +531,8 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             </div>
           </div>
         </div>
-        <div className="space-y-1.5">
-          <Label>日均消耗量</Label>
-          <Input type="number" step="0.01" value={form.dailyUsage} onChange={e => setForm(p => ({ ...p, dailyUsage: e.target.value }))} placeholder={`如：0.1（${form.unit || '单位'}/天）`} />
-          <p className="text-xs text-muted-foreground">用于预估库存耗尽时间，提前7天提醒回购</p>
+        <div className="rounded-lg bg-primary/5 px-3 py-2.5">
+          <p className="text-xs text-muted-foreground">💡 日均消耗量将根据喂食记录自动学习计算，无需手动填写。喂食记录越多，估算越准确。</p>
         </div>
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5">
           <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={v => setForm(p => ({ ...p, syncExpense: !!v }))} />
