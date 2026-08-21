@@ -127,8 +127,9 @@ export default function FeedingPage() {
               return (
                 <div
                   key={dateStr}
+                  onClick={() => setSelectedDate(dateStr)}
                   className={cn(
-                    'relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-colors cursor-default',
+                    'relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-colors cursor-pointer',
                     isToday ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/50',
                   )}
                 >
