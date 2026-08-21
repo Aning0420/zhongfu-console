@@ -155,6 +155,7 @@ export default function ProcurementPage() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">库存</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">单价</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">供应商</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">采购时间</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">生产日期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">保质期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">状态</th>
@@ -191,6 +192,7 @@ export default function ProcurementPage() {
                     </td>
                     <td className="px-4 py-3 text-foreground">¥{order.unitPrice}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.supplier}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{order.purchaseDate}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.productionDate || '-'}</td>
                     <td className="px-4 py-3">
                       {order.shelfLife ? (
@@ -250,6 +252,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
   const [form, setForm] = useState({
     itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
     productionDate: '', shelfLife: '', syncExpense: true,
+    purchaseDate: new Date().toISOString().split('T')[0],
   });
 
   const handleSubmit = () => {
@@ -261,7 +264,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
       quantity: Number(form.quantity),
       unit: form.unit,
       unitPrice: Number(form.unitPrice),
-      purchaseDate: new Date().toISOString().split('T')[0],
+      purchaseDate: form.purchaseDate,
       status: 'pending',
       consumed: 0,
       supplier: form.supplier,
@@ -306,6 +309,10 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Label>供应商</Label>
             <Input value={form.supplier} onChange={e => setForm(p => ({ ...p, supplier: e.target.value }))} placeholder="供应商名称" />
           </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>采购时间</Label>
+          <Input type="date" value={form.purchaseDate} onChange={e => setForm(p => ({ ...p, purchaseDate: e.target.value }))} />
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div className="space-y-1.5">
