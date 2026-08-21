@@ -37,6 +37,7 @@ export default function FeedingPage() {
   const { state, addFeedingRecord, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -62,7 +63,6 @@ export default function FeedingPage() {
     return map;
   }, [state.feedingRecords]);
 
-  const selectedDate = new Date().toISOString().split('T')[0];
   const todayRecords = recordsByDate[selectedDate] || [];
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
@@ -127,10 +127,10 @@ export default function FeedingPage() {
               return (
                 <div
                   key={dateStr}
-                  onClick={() => setSelectedDate(dateStr)}
+                  onClick={() => { setSelectedDate(dateStr); }}
                   className={cn(
-                    'relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-colors cursor-pointer',
-                    isToday ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/50',
+                    'relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all cursor-pointer select-none',
+                    isToday ? 'bg-primary/20 border-2 border-primary font-bold' : 'hover:bg-primary/10 border border-transparent',
                   )}
                 >
                   <span className={cn(
