@@ -1,0 +1,17 @@
+{
+  "name": "钟福供养办事处",
+  "short_name": "钟福供养",
+  "description": "钟福生活管理中控台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFF9F7",
+  "theme_color": "#B0E0E6",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -24,9 +24,15 @@ export default function Sidebar({ collapsed, onToggle, onOpenChat }: SidebarProp
 
   return (
     <aside className="sticky top-0 z-40 h-screen w-[74px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col items-center">
-      {/* Logo */}
+      {/* Toggle Button (top) */}
       <div className="flex items-center justify-center h-14 w-full border-b border-sidebar-border shrink-0">
-        <span className="text-xl">🐾</span>
+        <button
+          onClick={onToggle}
+          className="flex items-center justify-center w-10 h-10 rounded-xl hover:bg-sidebar-accent transition-colors"
+          title="收起侧边栏"
+        >
+          <span className="text-xl">🐾</span>
+        </button>
       </div>
 
       {/* Navigation */}
@@ -67,18 +73,6 @@ export default function Sidebar({ collapsed, onToggle, onOpenChat }: SidebarProp
         <span className="text-[10px] mt-1 leading-none font-medium text-muted-foreground">助手</span>
       </button>
 
-      {/* Collapse Toggle */}
-      <div className="pb-3 pt-1 w-full flex justify-center border-t border-sidebar-border">
-        <button
-          onClick={onToggle}
-          className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-          title="收起侧边栏"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
     </aside>
   );
 }
@@ -88,7 +82,7 @@ export function FloatingPawButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-accent/90 text-white shadow-[0_4px_16px_rgba(92,184,228,0.4)] flex items-center justify-center text-xl hover:scale-105 active:scale-95 transition-all duration-200 hover:shadow-[0_6px_20px_rgba(92,184,228,0.5)]"
+      className="fixed top-4 left-4 z-50 w-12 h-12 rounded-full bg-accent/90 text-white shadow-[0_4px_16px_rgba(92,184,228,0.4)] flex items-center justify-center text-xl hover:scale-105 active:scale-95 transition-all duration-200 hover:shadow-[0_6px_20px_rgba(92,184,228,0.5)]"
       title="展开侧边栏"
     >
       🐾
