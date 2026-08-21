@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import type { Expense } from '@/lib/store';
 import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order } from '@/lib/store';
@@ -29,7 +31,7 @@ function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } |
 }
 
 export default function ProcurementPage() {
-  const { state, addOrder, updateOrderStatus } = useAppContext();
+  const { state, addOrder, updateOrderStatus, addExpense } = useAppContext();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAdd, setShowAdd] = useState(false);
@@ -76,7 +78,7 @@ export default function ProcurementPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 新建采购
             </Button>
           </DialogTrigger>
-          <AddOrderDialog onClose={() => setShowAdd(false)} onAdd={addOrder} />
+          <AddOrderDialog onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />
         </Dialog>
       </div>
 
@@ -244,14 +246,15 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
   );
 }
 
-function AddOrderDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void }) {
+function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
     itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
-    productionDate: '', shelfLife: '',
+    productionDate: '', shelfLife: '', syncExpense: true,
   });
 
   const handleSubmit = () => {
     if (!form.itemName || !form.quantity || !form.unitPrice) return;
+    const totalAmount = Number(form.quantity) * Number(form.unitPrice);
     onAdd({
       itemName: form.itemName,
       category: form.category,
@@ -265,6 +268,15 @@ function AddOrderDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (order
       productionDate: form.productionDate || undefined,
       shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
     });
+    if (form.syncExpense && totalAmount > 0) {
+      addExpense({
+        date: new Date().toISOString().split('T')[0],
+        category: form.category,
+        amount: totalAmount,
+        description: `采购${form.itemName}`,
+        relatedModule: 'procurement',
+      });
+    }
     onClose();
   };
 
@@ -318,6 +330,12 @@ function AddOrderDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (order
             <Label>保质期(天)</Label>
             <Input type="number" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：365" />
           </div>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5">
+          <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={v => setForm(p => ({ ...p, syncExpense: !!v }))} />
+          <label htmlFor="sync-expense" className="text-sm text-muted-foreground cursor-pointer select-none">
+            同步记录购物支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number(form.quantity || 0) * Number(form.unitPrice || 0)).toFixed(2)}）
+          </label>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>取消</Button>
