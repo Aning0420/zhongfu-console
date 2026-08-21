@@ -9,17 +9,19 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseClient();
 
     if (type === 'all') {
-      const [orders, feeding, health, expenses] = await Promise.all([
+      const [orders, feeding, health, expenses, plans] = await Promise.all([
         supabase.from('orders').select('*').order('created_at', { ascending: true }),
         supabase.from('feeding_records').select('*').order('created_at', { ascending: true }),
         supabase.from('health_records').select('*').order('created_at', { ascending: true }),
         supabase.from('expenses').select('*').order('created_at', { ascending: true }),
+        supabase.from('feeding_plans').select('*').order('created_at', { ascending: true }),
       ]);
       return NextResponse.json({
         orders: orders.data || [],
         feedingRecords: feeding.data || [],
         healthRecords: health.data || [],
         expenses: expenses.data || [],
+        feedingPlans: plans.data || [],
       });
     }
 

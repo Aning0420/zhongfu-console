@@ -25,6 +25,27 @@ export interface FeedingRecord {
   eatingSpeed?: 'fast' | 'normal' | 'slow'; // 进食速度/喜好程度
 }
 
+// 喂食计划阶段
+export interface FeedingPlanStage {
+  id: string;
+  name: string; // 阶段名称，如"恢复期"、"换粮过渡"
+  startDate: string;
+  endDate: string;
+  description: string; // 详细描述
+  mealsPerDay: number; // 每天几顿
+  mealSchedule: { time: string; food: string; note: string }[]; // 每顿安排
+  supplements?: string; // 营养补充说明
+}
+
+// 喂食计划
+export interface FeedingPlan {
+  id: string;
+  name: string;
+  stages: FeedingPlanStage[];
+  createdAt: string;
+  active: boolean;
+}
+
 export interface HealthRecord {
   id: string;
   date: string;
@@ -55,6 +76,7 @@ export interface ChatMessage {
 export interface AppState {
   orders: Order[];
   feedingRecords: FeedingRecord[];
+  feedingPlans: FeedingPlan[];
   healthRecords: HealthRecord[];
   expenses: Expense[];
   chatMessages: ChatMessage[];
@@ -115,7 +137,7 @@ const defaultChatMessages: ChatMessage[] = [
 
 export function loadState(): AppState {
   if (typeof window === 'undefined') {
-    return { orders: defaultOrders, feedingRecords: defaultFeedingRecords, healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
+    return { orders: defaultOrders, feedingRecords: defaultFeedingRecords, feedingPlans: [], healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -128,7 +150,7 @@ export function loadState(): AppState {
       return parsed;
     }
   } catch { /* ignore */ }
-  const initial = { orders: defaultOrders, feedingRecords: defaultFeedingRecords, healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
+  const initial = { orders: defaultOrders, feedingRecords: defaultFeedingRecords, feedingPlans: [], healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
   return initial;
 }

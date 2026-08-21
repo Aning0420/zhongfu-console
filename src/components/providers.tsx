@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { loadState, saveState, type AppState, type Order, type FeedingRecord, type HealthRecord, type Expense, type ChatMessage } from '@/lib/store';
+import { loadState, saveState, type AppState, type Order, type FeedingRecord, type FeedingPlan, type HealthRecord, type Expense, type ChatMessage } from '@/lib/store';
 
 interface AppContextType {
   state: AppState;
@@ -12,6 +12,9 @@ interface AppContextType {
   updateFeedingRecord: (id: string, record: Partial<FeedingRecord>) => void;
   deleteFeedingRecord: (id: string) => void;
   toggleFeedingComplete: (id: string) => void;
+  addFeedingPlan: (plan: Omit<FeedingPlan, 'id' | 'createdAt'>) => string;
+  updateFeedingPlan: (id: string, updates: Partial<Omit<FeedingPlan, 'id' | 'createdAt'>>) => void;
+  deleteFeedingPlan: (id: string) => void;
   addHealthRecord: (record: Omit<HealthRecord, 'id'>) => void;
   deleteHealthRecord: (id: string) => void;
   addExpense: (expense: Omit<Expense, 'id'>) => void;
@@ -136,6 +139,12 @@ async function loadFromCloud(): Promise<AppState | null> {
       healthRecords: (json.healthRecords || []).map(rowToHealthRecord),
       expenses: (json.expenses || []).map(rowToExpense),
       chatMessages: [],
+      feedingPlans: (json.feedingPlans || []).map((p: any) => ({
+        ...p,
+        startDate: p.start_date,
+        endDate: p.end_date,
+        stages: p.stages ? JSON.parse(p.stages) : [],
+      })),
     };
   } catch {
     return null;
@@ -146,6 +155,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>({
     orders: [],
     feedingRecords: [],
+    feedingPlans: [],
     healthRecords: [],
     expenses: [],
     chatMessages: [],
@@ -267,6 +277,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const addFeedingPlan = useCallback((plan: Omit<FeedingPlan, 'id' | 'createdAt'>) => {
+    const id = genId('fp');
+    const newPlan = { ...plan, id, createdAt: new Date().toISOString() };
+    setState(prev => ({ ...prev, feedingPlans: [...prev.feedingPlans, newPlan] }));
+    syncToCloud('feeding_plans', {
+      id,
+      name: plan.name,
+      stages: JSON.stringify(plan.stages),
+      active: plan.active ? 1 : 0,
+    });
+    return id;
+  }, []);
+
+  const updateFeedingPlan = useCallback((id: string, updates: Partial<Omit<FeedingPlan, 'id' | 'createdAt'>>) => {
+    setState(prev => ({
+      ...prev,
+      feedingPlans: prev.feedingPlans.map(p => p.id === id ? { ...p, ...updates } : p),
+    }));
+    const updateData: Record<string, any> = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.stages !== undefined) updateData.stages = JSON.stringify(updates.stages);
+    if (updates.active !== undefined) updateData.active = updates.active ? 1 : 0;
+    updateInCloud('feeding_plans', id, updateData);
+  }, []);
+
+  const deleteFeedingPlan = useCallback((id: string) => {
+    setState(prev => ({ ...prev, feedingPlans: prev.feedingPlans.filter(p => p.id !== id) }));
+    deleteFromCloud('feeding_plans', id);
+  }, []);
+
   const addHealthRecord = useCallback((record: Omit<HealthRecord, 'id'>) => {
     const id = genId('h');
     const newRecord = { ...record, id };
@@ -346,7 +386,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, deleteOrder, addFeedingRecord, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addHealthRecord, deleteHealthRecord, addExpense, deleteExpense, addChatMessages, clearChatMessages }}>
+    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, deleteOrder, addFeedingRecord, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, deleteHealthRecord, addExpense, deleteExpense, addChatMessages, clearChatMessages }}>
       {children}
     </AppContext.Provider>
   );

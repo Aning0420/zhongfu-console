@@ -7,9 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, TrendingUp, TrendingDown, Trash2, Calendar, Clock, Target, Edit3, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { FeedingRecord } from '@/lib/store';
+import type { FeedingRecord, FeedingPlan } from '@/lib/store';
+import { format } from 'date-fns';
+import { zhCN } from 'date-fns/locale';
 
 const mealIcons = {
   breakfast: Coffee,
