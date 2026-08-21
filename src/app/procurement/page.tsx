@@ -81,6 +81,32 @@ export default function ProcurementPage() {
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [state.orders]);
 
+  // Food preference analysis from feeding records
+  const foodPreferences = useMemo(() => {
+    const foodMap = new Map<string, { fast: number; normal: number; slow: number; total: number }>();
+    state.feedingRecords.forEach(r => {
+      const food = r.foodName || r.mealType;
+      if (!foodMap.has(food)) foodMap.set(food, { fast: 0, normal: 0, slow: 0, total: 0 });
+      const stats = foodMap.get(food)!;
+      stats.total++;
+      if (r.eatingSpeed === 'fast') stats.fast++;
+      else if (r.eatingSpeed === 'slow') stats.slow++;
+      else stats.normal++;
+    });
+    // Link to procurement orders
+    return state.orders
+      .filter(o => o.status === 'delivered')
+      .map(order => {
+        const food = order.itemName;
+        const stats = foodMap.get(food);
+        if (!stats || stats.total === 0) return { order, preference: 'unknown' as const, stats: null };
+        const score = (stats.fast * 2 + stats.normal) / (stats.total * 2);
+        const preference = score >= 0.6 ? 'loved' as const : score <= 0.3 ? 'disliked' as const : 'normal' as const;
+        return { order, preference, stats };
+      })
+      .filter(item => item.preference !== 'unknown');
+  }, [state.orders, state.feedingRecords]);
+
   const summary = useMemo(() => {
     const total = state.orders.reduce((s, o) => s + o.quantity * o.unitPrice, 0);
     const delivered = state.orders.filter(o => o.status === 'delivered').length;
@@ -156,6 +182,59 @@ export default function ProcurementPage() {
                     {daysLeft === 0 ? '今天耗尽' : `还剩 ${daysLeft} 天`}
                   </Badge>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Food Preference Repurchase Suggestions */}
+      {foodPreferences.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-4 card-hover">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🐾</span>
+              <h3 className="font-semibold text-foreground text-sm">回购决策建议</h3>
+            </div>
+            <div className="flex gap-2">
+              <Badge variant="secondary" className="bg-primary/10 text-primary text-xs">
+                {foodPreferences.filter(f => f.preference === 'loved').length} 推荐回购
+              </Badge>
+              <Badge variant="secondary" className="bg-destructive/10 text-destructive text-xs">
+                {foodPreferences.filter(f => f.preference === 'disliked').length} 不建议回购
+              </Badge>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {foodPreferences.map(({ order, preference, stats }) => (
+              <div
+                key={order.id}
+                className={`rounded-lg border p-3 transition-all ${
+                  preference === 'loved'
+                    ? 'border-primary/30 bg-primary/5'
+                    : preference === 'disliked'
+                    ? 'border-destructive/30 bg-destructive/5'
+                    : 'border-border bg-muted/30'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-medium text-sm text-foreground">{order.itemName}</span>
+                  {preference === 'loved' ? (
+                    <Badge className="bg-primary/15 text-primary text-xs">推荐回购</Badge>
+                  ) : preference === 'disliked' ? (
+                    <Badge className="bg-destructive/15 text-destructive text-xs">不建议</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs">一般</Badge>
+                  )}
+                </div>
+                {stats && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="text-primary">😋{stats.fast}</span>
+                    <span>😐{stats.normal}</span>
+                    <span className="text-destructive">😒{stats.slow}</span>
+                    <span className="ml-auto">共{stats.total}次</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
