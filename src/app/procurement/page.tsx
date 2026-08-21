@@ -400,7 +400,7 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
 function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
     itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', dailyUsage: '', syncExpense: true,
+    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', dailyUsage: '', syncExpense: true,
     purchaseDate: new Date().toISOString().split('T')[0],
   });
 
@@ -418,7 +418,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
       consumed: 0,
       supplier: form.supplier,
       productionDate: form.productionDate || undefined,
-      shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
+      shelfLife: form.shelfLife ? (form.shelfLifeUnit === 'year' ? Number(form.shelfLife) * 365 : form.shelfLifeUnit === 'month' ? Number(form.shelfLife) * 30 : Number(form.shelfLife)) : undefined,
       dailyUsage: form.dailyUsage ? Number(form.dailyUsage) : undefined,
     });
     if (form.syncExpense && totalAmount > 0) {
@@ -484,8 +484,19 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Input type="date" value={form.productionDate} onChange={e => setForm(p => ({ ...p, productionDate: e.target.value }))} />
           </div>
           <div className="space-y-1.5">
-            <Label>保质期(天)</Label>
-            <Input type="number" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：365" />
+            <Label>保质期</Label>
+            <div className="flex gap-2">
+              <Input type="number" className="flex-1" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：30" />
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={form.shelfLifeUnit}
+                onChange={e => setForm(p => ({ ...p, shelfLifeUnit: e.target.value as 'day' | 'month' | 'year' }))}
+              >
+                <option value="day">天</option>
+                <option value="month">月</option>
+                <option value="year">年</option>
+              </select>
+            </div>
           </div>
         </div>
         <div className="space-y-1.5">
