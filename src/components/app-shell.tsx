@@ -5,6 +5,7 @@ import { AppProvider } from '@/components/providers';
 import Sidebar, { FloatingPawButton } from '@/components/sidebar';
 import { ChatDialog } from '@/components/chat-dialog';
 import { QuickEntryDialog } from '@/components/quick-entry-dialog';
+import { PwaRegister } from '@/components/pwa-register';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [chatOpen, setChatOpen] = useState(false);
@@ -27,7 +28,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AppProvider>
-      <div className="flex min-h-screen bg-background">
+      <PwaRegister />
+      <div className="app-shell flex min-h-screen bg-background">
         {!sidebarCollapsed && (
           <Sidebar
             onToggle={() => setSidebarVisibility(true)}
@@ -38,7 +40,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {sidebarCollapsed && (
           <FloatingPawButton onClick={() => setSidebarVisibility(false)} />
         )}
-        <main className="flex-1 min-w-0 overflow-x-hidden p-4 sm:p-6 transition-all duration-300">
+        <main className="app-main flex-1 min-w-0 overflow-x-hidden p-4 sm:p-6 transition-all duration-300">
           <div className="max-w-[1200px] mx-auto">
             {children}
           </div>

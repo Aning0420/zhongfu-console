@@ -24,7 +24,7 @@ export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat }: Side
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 z-40 h-screen w-[74px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col items-center">
+    <aside className="app-sidebar sticky top-0 z-40 h-screen w-[74px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col items-center">
       {/* Sidebar visibility */}
       <div className="flex items-center justify-center h-14 w-full border-b border-sidebar-border shrink-0">
         <button
