@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { getSupabaseClient } from "@/storage/database/supabase-client";
 import { INVENTORY_CATEGORIES } from "@/lib/inventory-categories";
 
 interface ChatContentPart {
@@ -114,15 +113,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Save user message to Supabase
-  const supabase = getSupabaseClient();
-  const userMsgContent = typeof currentMsg?.content === "string" ? currentMsg.content : "[图片消息]";
-  await supabase.from("chat_messages").insert({
-    role: "user",
-    content: userMsgContent,
-    image_url: image || null,
-  });
-
   // Stream response
   const stream = client.stream(llmMessages, {
     model: "doubao-seed-1-8-251228",
@@ -157,13 +147,6 @@ export async function POST(request: NextRequest) {
             // ignore parse errors
           }
         }
-
-        // Save assistant message to Supabase
-        await supabase.from("chat_messages").insert({
-          role: "assistant",
-          content: fullResponse,
-          synced_data: syncedData,
-        });
 
         // Send sync data to frontend
         if (syncedData) {

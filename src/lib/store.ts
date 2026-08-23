@@ -102,6 +102,13 @@ export interface AppState {
 
 const STORAGE_KEY = 'zhongfu-console-data';
 
+export interface AppBackup {
+  app: 'zhongfu-console';
+  version: 1;
+  exportedAt: string;
+  data: AppState;
+}
+
 const defaultOrders: Order[] = [
   { id: 'o1', itemName: '皇家猫粮 K36', category: '猫粮', quantity: 10, unit: 'kg', unitPrice: 89, purchaseDate: '2025-08-01', status: 'delivered', consumed: 4, supplier: '宠粮旗舰店', productionDate: '2025-07-01', shelfLife: 365, dailyUsage: 0.1 },
   { id: 'o2', itemName: '妙鲜包金枪鱼味', category: '主食餐包', quantity: 24, unit: '包', unitPrice: 8.5, purchaseDate: '2025-08-05', status: 'delivered', consumed: 12, supplier: '宠粮旗舰店', productionDate: '2025-06-15', shelfLife: 180, dailyUsage: 0.5 },
@@ -176,6 +183,49 @@ export function loadState(): AppState {
 export function saveState(state: AppState): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function createBackup(state: AppState): AppBackup {
+  return {
+    app: 'zhongfu-console',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data: state,
+  };
+}
+
+export function parseBackup(raw: string): AppState {
+  const parsed: unknown = JSON.parse(raw);
+  const candidate = isRecord(parsed) && parsed.app === 'zhongfu-console'
+    ? parsed.data
+    : parsed;
+
+  if (!isRecord(candidate)) {
+    throw new Error('备份文件格式不正确');
+  }
+
+  const requiredCollections = [
+    'orders',
+    'feedingRecords',
+    'healthRecords',
+    'expenses',
+  ] as const;
+  if (requiredCollections.some(key => !Array.isArray(candidate[key]))) {
+    throw new Error('备份文件缺少必要的数据');
+  }
+
+  return {
+    orders: candidate.orders as Order[],
+    feedingRecords: candidate.feedingRecords as FeedingRecord[],
+    feedingPlans: Array.isArray(candidate.feedingPlans) ? candidate.feedingPlans as FeedingPlan[] : [],
+    healthRecords: candidate.healthRecords as HealthRecord[],
+    expenses: candidate.expenses as Expense[],
+    chatMessages: Array.isArray(candidate.chatMessages) ? candidate.chatMessages as ChatMessage[] : [],
+  };
 }
 
 /** Calculate average daily consumption for an item based on feeding records */

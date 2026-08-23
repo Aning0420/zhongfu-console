@@ -6,10 +6,12 @@ import Sidebar, { FloatingPawButton } from '@/components/sidebar';
 import { ChatDialog } from '@/components/chat-dialog';
 import { QuickEntryDialog } from '@/components/quick-entry-dialog';
 import { PwaRegister } from '@/components/pwa-register';
+import { LocalDataDialog } from '@/components/local-data-dialog';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [chatOpen, setChatOpen] = useState(false);
   const [quickEntryOpen, setQuickEntryOpen] = useState(false);
+  const [localDataOpen, setLocalDataOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -35,6 +37,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onToggle={() => setSidebarVisibility(true)}
             onOpenQuickEntry={() => setQuickEntryOpen(true)}
             onOpenChat={() => setChatOpen(true)}
+            onOpenLocalData={() => setLocalDataOpen(true)}
           />
         )}
         {sidebarCollapsed && (
@@ -47,6 +50,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </main>
         <ChatDialog open={chatOpen} onClose={() => setChatOpen(false)} />
         <QuickEntryDialog open={quickEntryOpen} onOpenChange={setQuickEntryOpen} />
+        <LocalDataDialog open={localDataOpen} onClose={() => setLocalDataOpen(false)} />
       </div>
     </AppProvider>
   );

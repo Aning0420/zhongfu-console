@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { CirclePlus } from 'lucide-react';
+import { CirclePlus, Database } from 'lucide-react';
 
 const navItems = [
   { href: '/', emoji: '🏠', label: '总览' },
@@ -18,9 +18,10 @@ interface SidebarProps {
   onToggle: () => void;
   onOpenQuickEntry: () => void;
   onOpenChat: () => void;
+  onOpenLocalData: () => void;
 }
 
-export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat }: SidebarProps) {
+export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat, onOpenLocalData }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -64,6 +65,15 @@ export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat }: Side
           );
         })}
       </nav>
+
+      <button
+        onClick={onOpenLocalData}
+        className="flex h-[48px] w-[58px] flex-col items-center justify-center rounded-xl transition-all duration-150 btn-press hover:bg-sidebar-accent"
+        title="本机数据与备份"
+      >
+        <Database className="h-5 w-5 text-muted-foreground" />
+        <span className="mt-1 text-[10px] font-medium leading-none text-muted-foreground">数据</span>
+      </button>
 
       <button
         onClick={onOpenQuickEntry}

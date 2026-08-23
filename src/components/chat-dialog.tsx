@@ -36,7 +36,7 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], fall
 export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const {
     state, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan,
-    addHealthRecord, updateHealthRecord, addExpense,
+    addHealthRecord, updateHealthRecord, addExpense, addChatMessages, clearChatMessages,
   } = useAppContext();
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -47,35 +47,14 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load chat history from Supabase on first open
-  const loadHistory = useCallback(async () => {
-    if (historyLoaded) return;
-    try {
-      const res = await fetch('/api/chat-history');
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.messages && data.messages.length > 0) {
-        const historyMsgs: DisplayMessage[] = data.messages
-          .reverse()
-          .map((m: Record<string, unknown>) => ({
-            id: m.id as string,
-            role: m.role as 'user' | 'assistant',
-            content: (m.content as string).replace(/---SYNC_DATA_START---[\s\S]*?---SYNC_DATA_END---/g, '').trim(),
-            imageUrl: (m.image_url as string) || undefined,
-            synced: !!m.synced_data,
-            timestamp: new Date(m.created_at as string),
-          }));
-        setMessages(historyMsgs);
-      }
-      setHistoryLoaded(true);
-    } catch {
-      // Silently fail - localStorage data still works
-    }
-  }, [historyLoaded]);
-
   useEffect(() => {
-    if (open) loadHistory();
-  }, [open, loadHistory]);
+    if (!open || historyLoaded) return;
+    setMessages(state.chatMessages.map(message => ({
+      ...message,
+      timestamp: new Date(message.timestamp),
+    })));
+    setHistoryLoaded(true);
+  }, [open, historyLoaded, state.chatMessages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -296,6 +275,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     setInput('');
     setPendingImage(null);
 
+    let savedAssistantContent = '';
     try {
       // Build message history for API
       const apiMessages = messages
@@ -338,6 +318,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
               const displayText = fullText
                 .replace(/---SYNC_DATA_START---[\s\S]*?---SYNC_DATA_END---/g, '')
                 .trim();
+              savedAssistantContent = displayText;
               setMessages(prev =>
                 prev.map(m => m.id === assistantMsgId ? { ...m, content: displayText } : m)
               );
@@ -355,29 +336,30 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : '网络错误';
+      savedAssistantContent = `抱歉，出了点问题：${errMsg}`;
       setMessages(prev =>
         prev.map(m => m.id === assistantMsgId
-          ? { ...m, content: `抱歉，出了点问题：${errMsg}` }
+          ? { ...m, content: savedAssistantContent }
           : m
         )
       );
     } finally {
+      addChatMessages([
+        { role: 'user', content: content.trim() || '[图片消息]', timestamp: userMsg.timestamp.toISOString() },
+        { role: 'assistant', content: savedAssistantContent, timestamp: assistantMsg.timestamp.toISOString() },
+      ]);
       setLoading(false);
     }
-  }, [messages, syncData]);
+  }, [messages, syncData, addChatMessages]);
 
   const handleSubmit = useCallback(() => {
     sendMessage(input, pendingImage || undefined);
   }, [input, pendingImage, sendMessage]);
 
-  const handleClear = useCallback(async () => {
+  const handleClear = useCallback(() => {
     setMessages([]);
-    try {
-      await fetch('/api/chat-history', { method: 'DELETE' });
-    } catch {
-      // Silently fail
-    }
-  }, []);
+    clearChatMessages();
+  }, [clearChatMessages]);
 
   return (
     <>
@@ -466,7 +448,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                   {msg.synced && (
                     <div className="mt-1.5 flex items-center gap-1 text-[10px] opacity-60">
                       <span className="w-1 h-1 rounded-full bg-green-400" />
-                      已同步到数据
+                      已保存到本机数据
                     </div>
                   )}
                 </div>
