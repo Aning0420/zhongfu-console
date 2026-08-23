@@ -23,6 +23,7 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    files: ['src/**/*.{js,jsx,ts,tsx}'],
     rules: {
       'import/no-cycle': ['error', { ignoreExternal: true }],
       'react-hooks/set-state-in-effect': 'off',
@@ -45,6 +46,7 @@ const eslintConfig = defineConfig([
     // Build artifacts:
     'server.js',
     'dist/**',
+    '.runtime/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
   ]),

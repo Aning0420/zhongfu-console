@@ -46,15 +46,33 @@ export interface FeedingPlan {
   active: boolean;
 }
 
+export interface DailyObservation {
+  appetite: 'great' | 'normal' | 'low' | 'none';
+  energy: 'active' | 'normal' | 'quiet' | 'poor';
+  stool: 'normal' | 'soft' | 'diarrhea' | 'constipation' | 'unseen';
+  urine: 'normal' | 'less' | 'frequent' | 'abnormal' | 'unseen';
+  vomiting: 'none' | 'hairball' | 'food' | 'yellow' | 'other';
+}
+
+export interface CareReminder {
+  kind: 'medication' | 'deworming' | 'vaccine' | 'followup' | 'care' | 'other';
+  time?: string;
+  repeat: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  completed: boolean;
+}
+
 export interface HealthRecord {
   id: string;
   date: string;
-  type: 'visit' | 'medication' | 'weight';
+  endDate?: string;
+  type: 'visit' | 'medication' | 'weight' | 'observation' | 'reminder';
   title: string;
   detail: string;
   weight?: number;
   hospital?: string;
   doctor?: string;
+  observation?: DailyObservation;
+  reminder?: CareReminder;
 }
 
 export interface Expense {
@@ -85,12 +103,12 @@ export interface AppState {
 const STORAGE_KEY = 'zhongfu-console-data';
 
 const defaultOrders: Order[] = [
-  { id: 'o1', itemName: '皇家猫粮 K36', category: '干粮', quantity: 10, unit: 'kg', unitPrice: 89, purchaseDate: '2025-08-01', status: 'delivered', consumed: 4, supplier: '宠粮旗舰店', productionDate: '2025-07-01', shelfLife: 365, dailyUsage: 0.1 },
-  { id: 'o2', itemName: '妙鲜包金枪鱼味', category: '湿粮', quantity: 24, unit: '包', unitPrice: 8.5, purchaseDate: '2025-08-05', status: 'delivered', consumed: 12, supplier: '宠粮旗舰店', productionDate: '2025-06-15', shelfLife: 180, dailyUsage: 0.5 },
-  { id: 'o3', itemName: '猫砂豆腐砂', category: '用品', quantity: 6, unit: '袋', unitPrice: 35, purchaseDate: '2025-08-10', status: 'shipped', consumed: 2, supplier: '喵星人生活馆', productionDate: '2025-07-20', shelfLife: 730, dailyUsage: 0.15 },
+  { id: 'o1', itemName: '皇家猫粮 K36', category: '猫粮', quantity: 10, unit: 'kg', unitPrice: 89, purchaseDate: '2025-08-01', status: 'delivered', consumed: 4, supplier: '宠粮旗舰店', productionDate: '2025-07-01', shelfLife: 365, dailyUsage: 0.1 },
+  { id: 'o2', itemName: '妙鲜包金枪鱼味', category: '主食餐包', quantity: 24, unit: '包', unitPrice: 8.5, purchaseDate: '2025-08-05', status: 'delivered', consumed: 12, supplier: '宠粮旗舰店', productionDate: '2025-06-15', shelfLife: 180, dailyUsage: 0.5 },
+  { id: 'o3', itemName: '猫砂豆腐砂', category: '猫砂与清洁', quantity: 6, unit: '袋', unitPrice: 35, purchaseDate: '2025-08-10', status: 'shipped', consumed: 2, supplier: '喵星人生活馆', productionDate: '2025-07-20', shelfLife: 730, dailyUsage: 0.15 },
   { id: 'o4', itemName: '化毛膏营养膏', category: '保健品', quantity: 2, unit: '支', unitPrice: 68, purchaseDate: '2025-08-12', status: 'pending', consumed: 0, supplier: '宠物健康屋', productionDate: '2025-05-01', shelfLife: 90, dailyUsage: 0.05 },
   { id: 'o5', itemName: '逗猫棒套装', category: '玩具', quantity: 1, unit: '套', unitPrice: 45, purchaseDate: '2025-08-15', status: 'delivered', consumed: 0, supplier: '喵星人生活馆' },
-  { id: 'o6', itemName: '羊奶粉', category: '保健品', quantity: 3, unit: '罐', unitPrice: 128, purchaseDate: '2025-08-18', status: 'delivered', consumed: 1, supplier: '宠物健康屋', productionDate: '2025-08-01', shelfLife: 540, dailyUsage: 0.03 },
+  { id: 'o6', itemName: '羊奶粉', category: '奶', quantity: 3, unit: '罐', unitPrice: 128, purchaseDate: '2025-08-18', status: 'delivered', consumed: 1, supplier: '宠物健康屋', productionDate: '2025-08-01', shelfLife: 540, dailyUsage: 0.03 },
 ];
 
 const today = new Date();

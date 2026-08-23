@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Wallet, Plus, TrendingUp, TrendingDown, PieChart, Trash2 } from 'lucide-react';
+import { Wallet, Plus, TrendingUp, TrendingDown, PieChart, Trash2, Search, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Expense } from '@/lib/store';
 
@@ -24,15 +24,25 @@ const categoryColors: Record<string, string> = {
 };
 
 export default function ExpensesPage() {
-  const { state, addExpense, deleteExpense } = useAppContext();
+  const { state, addExpense, updateExpense, deleteExpense } = useAppContext();
   const [showAdd, setShowAdd] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+
+  const availableCategories = useMemo(() =>
+    Array.from(new Set(state.expenses.map(expense => expense.category))).sort((a, b) => a.localeCompare(b, 'zh-CN')),
+    [state.expenses]
+  );
 
   const filteredExpenses = useMemo(() =>
     state.expenses
       .filter(e => e.date.startsWith(filterMonth))
+      .filter(e => categoryFilter === 'all' || e.category === categoryFilter)
+      .filter(e => !search.trim() || e.description.toLowerCase().includes(search.trim().toLowerCase()) || e.category.includes(search.trim()))
       .sort((a, b) => b.date.localeCompare(a.date)),
-    [state.expenses, filterMonth]
+    [state.expenses, filterMonth, categoryFilter, search]
   );
 
   const stats = useMemo(() => {
@@ -68,7 +78,7 @@ export default function ExpensesPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 记一笔
             </Button>
           </DialogTrigger>
-          <AddExpenseDialog onClose={() => setShowAdd(false)} onAdd={addExpense} />
+          <ExpenseDialog onClose={() => setShowAdd(false)} onSave={addExpense} />
         </Dialog>
       </div>
 
@@ -119,31 +129,54 @@ export default function ExpensesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Expense List */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-base font-semibold text-foreground">支出明细</h2>
-            <Input
-              type="month"
-              value={filterMonth}
-              onChange={e => setFilterMonth(e.target.value)}
-              className="w-[160px] bg-card"
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[180px] flex-1 sm:w-[220px]">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索支出说明" className="bg-card pl-9" />
+              </div>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-[130px] bg-card"><SelectValue placeholder="全部分类" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部分类</SelectItem>
+                  {availableCategories.map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input
+                type="month"
+                value={filterMonth}
+                onChange={e => setFilterMonth(e.target.value)}
+                className="w-[150px] bg-card"
+              />
+            </div>
           </div>
           <div className="card-warm divide-y divide-border/50">
             {filteredExpenses.map(expense => (
               <div key={expense.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/20 transition-colors">
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   <div
                     className="w-2 h-8 rounded-full"
                     style={{ backgroundColor: categoryColors[expense.category] || '#8A8A8A' }}
                   />
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{expense.description}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{expense.description}</p>
                     <p className="text-xs text-muted-foreground">{expense.category} · {expense.date}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-2">
                   <span className="text-sm font-semibold text-foreground">¥{expense.amount.toLocaleString()}</span>
                   <button
+                    type="button"
+                    onClick={() => setEditingExpense(expense)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary-foreground"
+                    title="编辑支出"
+                    aria-label={`编辑支出：${expense.description}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => { if (confirm('确定删除该支出？')) deleteExpense(expense.id); }}
                     className="w-6 h-6 rounded-full border border-destructive/30 text-destructive flex items-center justify-center hover:bg-destructive/10 transition-all"
                     title="删除"
@@ -192,22 +225,40 @@ export default function ExpensesPage() {
           </div>
         </div>
       </div>
+
+      {editingExpense && (
+        <Dialog open onOpenChange={open => { if (!open) setEditingExpense(null); }}>
+          <ExpenseDialog
+            key={editingExpense.id}
+            initialExpense={editingExpense}
+            onClose={() => setEditingExpense(null)}
+            onSave={updates => {
+              updateExpense(editingExpense.id, updates);
+              setEditingExpense(null);
+            }}
+          />
+        </Dialog>
+      )}
     </div>
   );
 }
 
-function AddExpenseDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (expense: Omit<Expense, 'id'>) => void }) {
+function ExpenseDialog({ initialExpense, onClose, onSave }: {
+  initialExpense?: Expense;
+  onClose: () => void;
+  onSave: (expense: Omit<Expense, 'id'>) => void;
+}) {
   const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    category: '主粮',
-    amount: '',
-    description: '',
-    relatedModule: 'procurement' as Expense['relatedModule'],
+    date: initialExpense?.date || new Date().toISOString().split('T')[0],
+    category: initialExpense?.category || '主粮',
+    amount: initialExpense ? String(initialExpense.amount) : '',
+    description: initialExpense?.description || '',
+    relatedModule: initialExpense?.relatedModule || 'procurement' as Expense['relatedModule'],
   });
 
   const handleSubmit = () => {
     if (!form.amount || !form.description) return;
-    onAdd({
+    onSave({
       date: form.date,
       category: form.category,
       amount: Number(form.amount),
@@ -220,7 +271,7 @@ function AddExpenseDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (exp
   return (
     <DialogContent className="sm:max-w-[400px]">
       <DialogHeader>
-        <DialogTitle>记一笔支出</DialogTitle>
+        <DialogTitle>{initialExpense ? '编辑支出' : '记一笔支出'}</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
         <div className="grid grid-cols-2 gap-3">
@@ -264,7 +315,7 @@ function AddExpenseDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (exp
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground">确认</Button>
+          <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground">{initialExpense ? '保存修改' : '确认'}</Button>
         </div>
       </div>
     </DialogContent>

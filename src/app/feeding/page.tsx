@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, TrendingUp, TrendingDown, Trash2, Calendar, Clock, Target, Edit3, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, Trash2, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { FeedingRecord, FeedingPlan } from '@/lib/store';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import type { FeedingRecord } from '@/lib/store';
+import { FeedingPlanManager } from '@/components/feeding-plan-manager';
 
 const mealIcons = {
   breakfast: Coffee,
@@ -38,6 +38,7 @@ export default function FeedingPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [view, setView] = useState<'records' | 'plans'>('records');
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -64,9 +65,34 @@ export default function FeedingPage() {
   }, [state.feedingRecords]);
 
   const todayRecords = recordsByDate[selectedDate] || [];
+  const previousDate = useMemo(() => {
+    const date = new Date(`${selectedDate}T12:00:00`);
+    date.setDate(date.getDate() - 1);
+    return date.toISOString().split('T')[0];
+  }, [selectedDate]);
+  const previousDayRecords = recordsByDate[previousDate] || [];
+
+  const copyPreviousDay = () => {
+    if (todayRecords.length > 0) return;
+    previousDayRecords.forEach(record => {
+      addFeedingRecord({
+        date: selectedDate,
+        mealType: record.mealType,
+        foodName: record.foodName,
+        amount: record.amount,
+        completed: false,
+        note: '',
+      });
+    });
+  };
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+  const goToday = () => {
+    const now = new Date();
+    setCurrentDate(now);
+    setSelectedDate(now.toISOString().split('T')[0]);
+  };
 
   const formatDateStr = (d: Date) => d.toISOString().split('T')[0];
 
@@ -74,20 +100,37 @@ export default function FeedingPage() {
     <div className="space-y-6 fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">喂食日历</h1>
-          <p className="text-sm text-muted-foreground mt-1">记录每日喂食计划，追踪完成情况</p>
+          <h1 className="text-2xl font-bold text-foreground">喂食管理</h1>
+          <p className="text-sm text-muted-foreground mt-1">安排喂食计划，记录每天的完成情况</p>
         </div>
-        <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        {view === 'records' && <Dialog open={showAdd} onOpenChange={setShowAdd}>
           <DialogTrigger asChild>
             <Button className="btn-press bg-primary hover:bg-primary/90 text-primary-foreground">
               <Plus className="w-4 h-4 mr-1.5" /> 记录喂食
             </Button>
           </DialogTrigger>
-          <AddFeedingDialog onClose={() => setShowAdd(false)} onAdd={addFeedingRecord} />
-        </Dialog>
+          <AddFeedingDialog key={selectedDate} defaultDate={selectedDate} onClose={() => setShowAdd(false)} onAdd={addFeedingRecord} />
+        </Dialog>}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="inline-flex rounded-lg bg-muted/50 p-1" role="tablist" aria-label="喂食管理视图">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'records'}
+          onClick={() => setView('records')}
+          className={cn('rounded-md px-4 py-2 text-sm font-medium transition-colors', view === 'records' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+        >每日记录</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'plans'}
+          onClick={() => setView('plans')}
+          className={cn('rounded-md px-4 py-2 text-sm font-medium transition-colors', view === 'plans' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+        >喂食计划</button>
+      </div>
+
+      {view === 'records' ? <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendar */}
         <div className="lg:col-span-2 card-warm p-5">
           <div className="flex items-center justify-between mb-5">
@@ -98,7 +141,7 @@ export default function FeedingPage() {
               <Button variant="ghost" size="icon" onClick={prevMonth} className="w-8 h-8">
                 <ChevronLeft className="w-4 h-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setCurrentDate(new Date())} className="text-xs px-2 h-8">
+              <Button variant="ghost" size="icon" onClick={goToday} className="text-xs px-2 h-8">
                 今天
               </Button>
               <Button variant="ghost" size="icon" onClick={nextMonth} className="w-8 h-8">
@@ -122,7 +165,8 @@ export default function FeedingPage() {
               const records = recordsByDate[dateStr] || [];
               const allDone = records.length > 0 && records.every(r => r.completed);
               const someDone = records.some(r => r.completed);
-              const isToday = dateStr === selectedDate;
+              const isSelected = dateStr === selectedDate;
+              const isToday = dateStr === new Date().toISOString().split('T')[0];
 
               return (
                 <div
@@ -130,12 +174,16 @@ export default function FeedingPage() {
                   onClick={() => { setSelectedDate(dateStr); }}
                   className={cn(
                     'relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-all cursor-pointer select-none',
-                    isToday ? 'bg-primary/20 border-2 border-primary font-bold' : 'hover:bg-primary/10 border border-transparent',
+                    isSelected
+                      ? 'bg-primary/20 border-2 border-primary font-bold'
+                      : isToday
+                        ? 'bg-secondary/45 border border-primary/40'
+                        : 'hover:bg-primary/10 border border-transparent',
                   )}
                 >
                   <span className={cn(
                     'text-sm',
-                    isToday ? 'font-bold text-primary' : 'text-foreground',
+                    isSelected ? 'font-bold text-primary-foreground' : 'text-foreground',
                   )}>
                     {day.getDate()}
                   </span>
@@ -171,7 +219,19 @@ export default function FeedingPage() {
 
         {/* Today's Records */}
         <div className="card-warm p-5">
-          <h2 className="text-base font-semibold text-foreground mb-4">今日喂食记录</h2>
+          <div className="mb-4 flex items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">
+                {selectedDate === new Date().toISOString().split('T')[0] ? '今日喂食记录' : `${selectedDate.slice(5).replace('-', '月')}日喂食记录`}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1">{selectedDate}</p>
+            </div>
+            {todayRecords.length === 0 && previousDayRecords.length > 0 && (
+              <Button variant="outline" size="sm" onClick={copyPreviousDay} className="h-8 shrink-0 px-2.5 text-xs">
+                <Copy className="mr-1.5 h-3.5 w-3.5" />沿用前一天
+              </Button>
+            )}
+          </div>
           <div className="space-y-3">
             {(['breakfast', 'lunch', 'dinner', 'snack'] as const).map(mealType => {
               const mealRecords = todayRecords.filter(r => r.mealType === mealType);
@@ -313,24 +373,25 @@ export default function FeedingPage() {
             })()}
           </div>
         </div>
-      </div>
+      </div> : <FeedingPlanManager />}
     </div>
   );
 }
 
-function AddFeedingDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (record: Omit<FeedingRecord, 'id'>) => void }) {
+function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string; onClose: () => void; onAdd: (record: Omit<FeedingRecord, 'id'>) => void }) {
   const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: defaultDate,
     mealType: 'breakfast' as FeedingRecord['mealType'],
     foodName: '',
     amount: '',
     note: '',
     eatingSpeed: 'normal' as FeedingRecord['eatingSpeed'],
+    completed: true,
   });
 
   const handleSubmit = () => {
     if (!form.foodName || !form.amount) return;
-    onAdd({ ...form, completed: false });
+    onAdd(form);
     onClose();
   };
 
@@ -397,6 +458,10 @@ function AddFeedingDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (rec
           <Label>备注</Label>
           <Input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="可选" />
         </div>
+        <label className="flex items-center gap-2 rounded-lg bg-muted/45 px-3 py-2.5 text-sm text-muted-foreground">
+          <Checkbox checked={form.completed} onCheckedChange={checked => setForm(p => ({ ...p, completed: checked === true }))} />
+          已经吃完，直接完成本次打卡
+        </label>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground">确认</Button>

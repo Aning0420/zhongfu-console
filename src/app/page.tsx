@@ -13,12 +13,17 @@ import {
   MessageCircle,
   RefreshCw,
   Timer,
+  ArrowRight,
+  Scale,
+  Utensils,
+  Activity,
+  Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calcDailyUsage } from '@/lib/store';
 
 export default function DashboardPage() {
-  const { state } = useAppContext();
+  const { state, toggleFeedingComplete } = useAppContext();
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -32,15 +37,19 @@ export default function DashboardPage() {
       .filter(e => e.date.startsWith(thisMonth))
       .reduce((sum, e) => sum + e.amount, 0);
 
+    const todayObserved = state.healthRecords.some(record => record.type === 'observation' && record.date === today);
+    const dueReminders = state.healthRecords
+      .filter(record => record.type === 'reminder' && !record.reminder?.completed && record.date <= today)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
     // Expiring items (within 7 days)
     const expiringItems = state.orders
       .map(order => {
         if (!order.productionDate || !order.shelfLife || order.status !== 'delivered') return null;
-        const prod = new Date(order.productionDate);
+        const prod = new Date(`${order.productionDate}T00:00:00Z`);
         const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
-        const now = new Date();
-        const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-        if (daysLeft < 0 || daysLeft > 7) return null;
+        const daysLeft = Math.round((expiry.getTime() - new Date(`${today}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1000));
+        if (daysLeft > 7) return null;
         return { itemName: order.itemName, daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
       })
       .filter((item): item is { itemName: string; daysLeft: number; expiryDate: string } => item !== null)
@@ -50,9 +59,14 @@ export default function DashboardPage() {
     const repurchaseItems = state.orders
       .filter(o => o.status === 'delivered')
       .map(order => {
-        const dailyUsage = calcDailyUsage(order.itemName, state.feedingRecords);
-        if (!dailyUsage || dailyUsage <= 0) return null;
         const remaining = order.quantity - order.consumed;
+        const dailyUsage = order.dailyUsage && order.dailyUsage > 0
+          ? order.dailyUsage
+          : calcDailyUsage(order.itemName, state.feedingRecords);
+        if (remaining <= 0) {
+          return { itemName: order.itemName, daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: dailyUsage || 0, remaining: 0 };
+        }
+        if (remaining > 0 && (!dailyUsage || dailyUsage <= 0)) return null;
         const daysLeft = Math.floor(remaining / dailyUsage);
         if (daysLeft < 0 || daysLeft > 7) return null;
         const depletionDate = new Date(new Date().getTime() + daysLeft * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -61,8 +75,22 @@ export default function DashboardPage() {
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
-    return { completedFeedings, totalFeedings, monthExpenses, expiringItems, repurchaseItems };
+    return { completedFeedings, totalFeedings, monthExpenses, expiringItems, repurchaseItems, todayObserved, dueReminders };
   }, [state]);
+
+  const todayCare = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const mealOrder = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
+    return state.feedingRecords
+      .filter(record => record.date === today)
+      .sort((a, b) => mealOrder[a.mealType] - mealOrder[b.mealType]);
+  }, [state.feedingRecords]);
+
+  const latestWeight = useMemo(() => {
+    return state.healthRecords
+      .filter(record => record.type === 'weight' && record.weight)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+  }, [state.healthRecords]);
 
   const recentActivities = useMemo(() => {
     const activities: { id: string; icon: React.ElementType; color: string; text: string; time: string }[] = [];
@@ -85,7 +113,7 @@ export default function DashboardPage() {
         id: r.id,
         icon: HeartPulse,
         color: 'text-destructive',
-        text: `${r.type === 'visit' ? '就医' : r.type === 'medication' ? '用药' : '体检'}：${r.title}`,
+        text: `${r.type === 'visit' ? '就医' : r.type === 'medication' ? '用药' : r.type === 'weight' ? '体重' : r.type === 'observation' ? '健康观察' : '照护提醒'}：${r.title}`,
         time: r.date,
       });
     });
@@ -106,15 +134,126 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 fade-in">
       {/* Welcome */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">你好，欢迎回来</h1>
           <p className="text-sm text-muted-foreground mt-1">这是钟福今天的状态概览</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/15">
           <CalendarHeart className="w-4 h-4 text-primary" />
-          <span className="text-sm font-medium text-primary">钟福状态良好</span>
+          <span className="text-sm font-medium text-primary-foreground">照护数据已保存</span>
         </div>
+      </div>
+
+      {/* Daily care comes first: this is the primary repeat workflow. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)] gap-4">
+        <section className="card-warm p-5">
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Utensils className="w-4 h-4 text-primary-foreground" />
+                <h2 className="text-base font-semibold text-foreground">今日照护</h2>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">先完成今天的记录，统计会自动更新</p>
+            </div>
+            <span className="text-sm font-semibold text-primary-foreground whitespace-nowrap">
+              {stats.completedFeedings}/{stats.totalFeedings || 0} 已完成
+            </span>
+          </div>
+
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-4">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-300"
+              style={{ width: `${stats.totalFeedings ? (stats.completedFeedings / stats.totalFeedings) * 100 : 0}%` }}
+            />
+          </div>
+
+          {todayCare.length > 0 ? (
+            <div className="divide-y divide-border/60">
+              {todayCare.map(record => (
+                <div key={record.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <button
+                    type="button"
+                    onClick={() => toggleFeedingComplete(record.id)}
+                    className={cn(
+                      'w-7 h-7 rounded-full border flex items-center justify-center transition-colors shrink-0',
+                      record.completed
+                        ? 'bg-primary border-primary text-primary-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:border-primary'
+                    )}
+                    title={record.completed ? '标记为未完成' : '完成打卡'}
+                  >
+                    {record.completed ? <CheckCircle2 className="w-4 h-4" /> : <span className="w-2 h-2 rounded-full bg-muted-foreground/35" />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className={cn('text-sm font-medium', record.completed ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                      {record.mealType === 'breakfast' ? '早餐' : record.mealType === 'lunch' ? '午餐' : record.mealType === 'dinner' ? '晚餐' : '零食'} · {record.foodName}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{record.amount}{record.note ? ` · ${record.note}` : ''}</p>
+                  </div>
+                  {record.eatingSpeed && (
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {record.eatingSpeed === 'fast' ? '爱吃' : record.eatingSpeed === 'slow' ? '挑食' : '正常'}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-4 rounded-lg bg-muted/35 px-4 py-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">今天还没有喂食记录</p>
+                <p className="text-xs text-muted-foreground mt-1">使用左侧“记录”可直接完成一次喂食打卡</p>
+              </div>
+              <a href="/feeding" className="text-xs font-medium text-primary-foreground hover:underline shrink-0">查看日历</a>
+            </div>
+          )}
+
+          <a href="/feeding" className="inline-flex items-center gap-1 text-xs font-medium text-primary-foreground mt-4 hover:underline">
+            管理今天的喂食 <ArrowRight className="w-3 h-3" />
+          </a>
+        </section>
+
+        <section className="card-warm p-5">
+          <h2 className="text-base font-semibold text-foreground mb-4">需要关注</h2>
+          <div className="space-y-1">
+            <AttentionRow
+              icon={RefreshCw}
+              label="需要补货"
+              value={stats.repurchaseItems.length ? `${stats.repurchaseItems.length} 项` : '暂无'}
+              tone={stats.repurchaseItems.length ? 'text-[#D4915E]' : 'text-primary-foreground'}
+              href="/procurement"
+            />
+            <AttentionRow
+              icon={Timer}
+              label="7 天内到期"
+              value={stats.expiringItems.length ? `${stats.expiringItems.length} 项` : '暂无'}
+              tone={stats.expiringItems.length ? 'text-destructive' : 'text-primary-foreground'}
+              href="/procurement"
+            />
+            <AttentionRow
+              icon={Scale}
+              label="最近体重"
+              value={latestWeight?.weight ? `${latestWeight.weight} kg` : '未记录'}
+              tone="text-accent-foreground"
+              href="/health?tab=weight"
+            />
+            <AttentionRow
+              icon={Activity}
+              label="今日健康观察"
+              value={stats.todayObserved ? '已记录' : '待记录'}
+              tone={stats.todayObserved ? 'text-primary-foreground' : 'text-[#D4915E]'}
+              href="/health"
+            />
+            <AttentionRow
+              icon={Bell}
+              label="到期照护提醒"
+              value={stats.dueReminders.length ? `${stats.dueReminders.length} 项` : '暂无'}
+              tone={stats.dueReminders.length ? 'text-destructive' : 'text-primary-foreground'}
+              href="/health?tab=reminders"
+            />
+          </div>
+        </section>
       </div>
 
       {/* Stats Cards */}
@@ -123,9 +262,9 @@ export default function DashboardPage() {
           icon={CalendarHeart}
           label="今日喂食"
           value={`${stats.completedFeedings}/${stats.totalFeedings}`}
-          sub={stats.completedFeedings === stats.totalFeedings ? '已全部完成' : '待完成'}
-          color={stats.completedFeedings === stats.totalFeedings ? 'text-primary' : 'text-accent'}
-          bgColor={stats.completedFeedings === stats.totalFeedings ? 'bg-primary/8' : 'bg-accent/8'}
+          sub={stats.totalFeedings === 0 ? '尚未记录' : stats.completedFeedings === stats.totalFeedings ? '已全部完成' : '待完成'}
+          color={stats.totalFeedings > 0 && stats.completedFeedings === stats.totalFeedings ? 'text-primary-foreground' : 'text-accent'}
+          bgColor={stats.totalFeedings > 0 && stats.completedFeedings === stats.totalFeedings ? 'bg-primary/8' : 'bg-accent/8'}
         />
         <StatCard
           icon={Wallet}
@@ -202,7 +341,7 @@ export default function DashboardPage() {
                     ? 'bg-[#E88888]/10 text-[#E88888]'
                     : 'bg-[#E88888]/10 text-[#E88888]'
                 )}>
-                  {item.daysLeft === 0 ? '今天到期' : `还剩${item.daysLeft}天`}
+                  {item.daysLeft < 0 ? `已过期${Math.abs(item.daysLeft)}天` : item.daysLeft === 0 ? '今天到期' : `还剩${item.daysLeft}天`}
                 </span>
               </div>
             ))}
@@ -305,6 +444,19 @@ function QuickAction({
         <Icon className={cn('w-4 h-4', color)} />
       </div>
       <span className="text-sm font-medium text-foreground">{label}</span>
+    </a>
+  );
+}
+
+function AttentionRow({ icon: Icon, label, value, tone, href }: { icon: React.ElementType; label: string; value: string; tone: string; href: string }) {
+  return (
+    <a href={href} className="flex items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/40 transition-colors">
+      <div className="w-8 h-8 rounded-lg bg-muted/60 flex items-center justify-center shrink-0">
+        <Icon className={cn('w-4 h-4', tone)} />
+      </div>
+      <span className="text-sm text-muted-foreground flex-1">{label}</span>
+      <span className={cn('text-sm font-semibold', tone)}>{value}</span>
+      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
     </a>
   );
 }

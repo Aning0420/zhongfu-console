@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.aning.zhongfu-console</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>exec '/Users/aning/Documents/ChatGPT/New project/zhongfu-console/.runtime/node/bin/node' '/Users/aning/Documents/ChatGPT/New project/zhongfu-console/node_modules/next/dist/bin/next' dev '/Users/aning/Documents/ChatGPT/New project/zhongfu-console' -H 127.0.0.1 -p 3000</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/aning</string>
+		<key>PATH</key>
+		<string>/Users/aning/Documents/ChatGPT/New project/zhongfu-console/.runtime/node/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>USER</key>
+		<string>aning</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>/Users/aning/Library/Logs/zhongfu-console.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/aning/Library/Logs/zhongfu-console.log</string>
+</dict>
+</plist>

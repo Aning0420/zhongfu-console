@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { normalizeInventoryCategory } from '@/lib/inventory-categories';
 import { X, Send, ImagePlus, Trash2, Sparkles } from 'lucide-react';
 import { useAppContext } from './providers';
 import { cn } from '@/lib/utils';
+import type { CareReminder, DailyObservation } from '@/lib/store';
 
 interface DisplayMessage {
   id: string;
@@ -26,9 +28,15 @@ function genMsgId(): string {
   return `msg_${_msgId}_${Date.now()}`;
 }
 
+function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  const candidate = String(value || '');
+  return allowed.includes(candidate as T) ? candidate as T : fallback;
+}
+
 export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const {
-    addOrder, addFeedingRecord, addHealthRecord, addExpense,
+    state, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan,
+    addHealthRecord, updateHealthRecord, addExpense,
   } = useAppContext();
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -100,14 +108,13 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
   // Sync data to app modules
   const syncData = useCallback((syncData: { type: string; data: Record<string, unknown> }) => {
     const today = new Date().toISOString().split('T')[0];
-    const now = new Date().toISOString();
 
     switch (syncData.type) {
       case 'procurement': {
         const d = syncData.data;
         addOrder({
           itemName: String(d.item_name || '未知物品'),
-          category: String(d.category || 'daily') as 'food' | 'supplies' | 'health' | 'daily',
+          category: normalizeInventoryCategory(d.category),
           quantity: Number(d.quantity) || 1,
           unit: String(d.unit || '个'),
           unitPrice: Number(d.price) || 0,
@@ -141,30 +148,127 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         });
         break;
       }
+      case 'feeding_plan': {
+        const d = syncData.data;
+        const rawStages = Array.isArray(d.stages) ? d.stages : [];
+        const stages = rawStages.map((rawStage, stageIndex) => {
+          const stage = rawStage as Record<string, unknown>;
+          const rawMeals = Array.isArray(stage.meals) ? stage.meals : [];
+          const meals = rawMeals.map(rawMeal => {
+            const meal = rawMeal as Record<string, unknown>;
+            return {
+              time: String(meal.time || '08:00'),
+              food: String(meal.food || '待确认食物'),
+              note: String(meal.note || ''),
+            };
+          });
+          return {
+            id: `stage_${Date.now()}_${stageIndex}`,
+            name: String(stage.name || `阶段 ${stageIndex + 1}`),
+            startDate: String(stage.start_date || today),
+            endDate: String(stage.end_date || stage.start_date || today),
+            description: String(stage.description || ''),
+            mealsPerDay: Math.max(1, meals.length),
+            mealSchedule: meals.length > 0 ? meals : [{ time: '08:00', food: '待确认食物', note: '' }],
+            supplements: String(stage.supplements || ''),
+          };
+        });
+        const active = d.active !== false;
+        if (active) {
+          state.feedingPlans.forEach(plan => {
+            if (plan.active) updateFeedingPlan(plan.id, { active: false });
+          });
+        }
+        addFeedingPlan({
+          name: String(d.name || '助手创建的喂食计划'),
+          active,
+          stages: stages.length > 0 ? stages : [{
+            id: `stage_${Date.now()}_0`,
+            name: '日常喂养',
+            startDate: today,
+            endDate: today,
+            description: '请在喂食计划中补充安排',
+            mealsPerDay: 1,
+            mealSchedule: [{ time: '08:00', food: '待确认食物', note: '' }],
+            supplements: '',
+          }],
+        });
+        break;
+      }
       case 'weight': {
         const d = syncData.data;
         addHealthRecord({
           type: 'weight',
-          date: now,
+          date: today,
           title: '体重记录',
           detail: '对话助手录入',
           weight: Number(d.weight) || 0,
         });
         break;
       }
-      case 'health_visit': {
+      case 'daily_observation': {
         const d = syncData.data;
+        const observationDate = String(d.date || today);
+        const observation: DailyObservation = {
+          appetite: enumValue(d.appetite, ['great', 'normal', 'low', 'none'] as const, 'normal'),
+          energy: enumValue(d.energy, ['active', 'normal', 'quiet', 'poor'] as const, 'normal'),
+          stool: enumValue(d.stool, ['normal', 'soft', 'diarrhea', 'constipation', 'unseen'] as const, 'unseen'),
+          urine: enumValue(d.urine, ['normal', 'less', 'frequent', 'abnormal', 'unseen'] as const, 'unseen'),
+          vomiting: enumValue(d.vomiting, ['none', 'hairball', 'food', 'yellow', 'other'] as const, 'none'),
+        };
+        const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === observationDate);
+        if (existing) {
+          updateHealthRecord(existing.id, { detail: String(d.note || ''), observation });
+        } else {
+          addHealthRecord({ type: 'observation', date: observationDate, title: '每日健康观察', detail: String(d.note || ''), observation });
+        }
+        break;
+      }
+      case 'care_reminder': {
+        const d = syncData.data;
+        const reminder: CareReminder = {
+          kind: enumValue(d.kind, ['medication', 'deworming', 'vaccine', 'followup', 'care', 'other'] as const, 'care'),
+          time: d.time ? String(d.time) : undefined,
+          repeat: enumValue(d.repeat, ['none', 'daily', 'weekly', 'monthly', 'yearly'] as const, 'none'),
+          completed: false,
+        };
         addHealthRecord({
-          type: 'visit',
-          date: now,
-          title: String(d.reason || '常规检查'),
-          detail: String(d.description || ''),
-          hospital: '宠物医院',
+          type: 'reminder',
+          date: String(d.date || today),
+          title: String(d.title || '照护提醒'),
+          detail: String(d.note || ''),
+          reminder,
         });
         break;
       }
+      case 'health_visit': {
+        const d = syncData.data;
+        const startDate = String(d.start_date || today);
+        const endDate = d.end_date ? String(d.end_date) : undefined;
+        const cost = Number(d.cost) || 0;
+        const reason = String(d.reason || '常规检查');
+        addHealthRecord({
+          type: 'visit',
+          date: startDate,
+          endDate,
+          title: reason,
+          detail: String(d.description || ''),
+          hospital: String(d.hospital || '宠物医院'),
+          doctor: d.doctor ? String(d.doctor) : undefined,
+        });
+        if (cost > 0) {
+          addExpense({
+            date: startDate,
+            category: 'medical',
+            amount: cost,
+            description: `${reason} - 就医费用`,
+            relatedModule: 'health',
+          });
+        }
+        break;
+      }
     }
-  }, [addOrder, addFeedingRecord, addHealthRecord, addExpense]);
+  }, [state.feedingPlans, state.healthRecords, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan, addHealthRecord, updateHealthRecord, addExpense]);
 
   // Send message with streaming
   const sendMessage = useCallback(async (content: string, image?: string) => {
@@ -319,9 +423,9 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 <p className="text-xs text-[#6B8A9E]/70 mb-4">可以帮你录入数据、查询信息</p>
                 <div className="text-[11px] text-[#6B8A9E]/60 space-y-1">
                   <p>试试说：</p>
-                  <p>"买了猫粮200块"</p>
-                  <p>"喂了早餐"</p>
-                  <p>"体重4.5kg"</p>
+                  <p>“买了猫粮200块”</p>
+                  <p>“制定一周喂食计划”</p>
+                  <p>“猫瘟住院了7天”</p>
                   <p>或者直接发图片给我识别</p>
                 </div>
               </div>

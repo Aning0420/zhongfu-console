@@ -11,9 +11,10 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage } from '@/lib/store';
-import { ShoppingCart, Plus, Search, Package, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown } from 'lucide-react';
+import { Plus, Search, Package, PackageMinus, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
+import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -25,16 +26,24 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
 /** Get depletion info for an order */
 function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } | null {
   if (!order.productionDate || !order.shelfLife) return null;
-  const prod = new Date(order.productionDate);
+  const prod = new Date(`${order.productionDate}T00:00:00Z`);
   const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
-  const now = new Date();
-  const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  const today = new Date().toISOString().split('T')[0];
+  const daysLeft = Math.round((expiry.getTime() - new Date(`${today}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1000));
   return { daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
+}
+
+function expiryDaysLabel(daysLeft: number, compact = false) {
+  if (daysLeft < 0) return `已过期${compact ? '' : ' '}${Math.abs(daysLeft)}天`;
+  if (daysLeft === 0) return compact ? '今天' : '今天到期';
+  return compact ? `${daysLeft}天` : `还剩 ${daysLeft} 天`;
 }
 
 function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { daysLeft: number; depletionDate: string; dailyUsage: number } | null {
   const remaining = order.quantity - order.consumed;
-  if (remaining <= 0) return null;
+  if (remaining <= 0) {
+    return { daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: 0 };
+  }
   const dailyUsage = order.dailyUsage && order.dailyUsage > 0
     ? order.dailyUsage
     : calcDailyUsage(order.itemName, feedingRecords);
@@ -46,20 +55,29 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
 }
 
 export default function ProcurementPage() {
-  const { state, addOrder, updateOrderStatus, deleteOrder, addExpense } = useAppContext();
+  const { state, addOrder, updateOrderStatus, updateOrderCategory, recordOrderUsage, deleteOrder, addExpense } = useAppContext();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [showAdd, setShowAdd] = useState(false);
+  const [usageOrder, setUsageOrder] = useState<Order | null>(null);
 
   const filteredOrders = useMemo(() => {
     return state.orders
       .filter(o => {
-        if (statusFilter !== 'all' && o.status !== statusFilter) return false;
+        const expiry = getExpiryInfo(o);
+        const depletion = getDepletionInfo(o, state.feedingRecords);
+        const stockRatio = o.quantity > 0 ? (o.quantity - o.consumed) / o.quantity : 0;
+        if (statusFilter === 'low-stock' && !(o.status === 'delivered' && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
+        if (statusFilter === 'expiring' && !(o.status === 'delivered' && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
+        if (statusFilter === 'expired' && !(o.status === 'delivered' && expiry && expiry.daysLeft < 0)) return false;
+        if (!['all', 'low-stock', 'expiring', 'expired'].includes(statusFilter) && o.status !== statusFilter) return false;
+        if (categoryFilter !== 'all' && o.category !== categoryFilter) return false;
         if (search && !o.itemName.includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
         return true;
       })
       .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate));
-  }, [state.orders, search, statusFilter]);
+  }, [state.orders, state.feedingRecords, search, statusFilter, categoryFilter]);
 
   // Items expiring within 7 days
   const expiringItems = useMemo(() => {
@@ -69,7 +87,7 @@ export default function ProcurementPage() {
         if (!info) return null;
         return { order, ...info };
       })
-      .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && item.daysLeft >= 0 && item.order.status === 'delivered')
+      .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && item.order.status === 'delivered')
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [state.orders]);
 
@@ -113,18 +131,25 @@ export default function ProcurementPage() {
   }, [state.orders, state.feedingRecords]);
 
   const summary = useMemo(() => {
-    const total = state.orders.reduce((s, o) => s + o.quantity * o.unitPrice, 0);
-    const delivered = state.orders.filter(o => o.status === 'delivered').length;
+    const stockValue = state.orders
+      .filter(o => o.status === 'delivered')
+      .reduce((sum, order) => sum + Math.max(0, order.quantity - order.consumed) * order.unitPrice, 0);
+    const lowStock = state.orders.filter(order => {
+      if (order.status !== 'delivered') return false;
+      const ratio = order.quantity > 0 ? (order.quantity - order.consumed) / order.quantity : 0;
+      const depletion = getDepletionInfo(order, state.feedingRecords);
+      return ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7);
+    }).length;
     const pending = state.orders.filter(o => o.status === 'pending' || o.status === 'shipped').length;
-    return { total, delivered, pending, count: state.orders.length };
-  }, [state.orders]);
+    return { stockValue, lowStock, pending, count: state.orders.length };
+  }, [state.orders, state.feedingRecords]);
 
   return (
     <div className="space-y-6 fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">采购总览</h1>
-          <p className="text-sm text-muted-foreground mt-1">管理所有采购订单与物资库存</p>
+          <h1 className="text-2xl font-bold text-foreground">物资与采购</h1>
+          <p className="text-sm text-muted-foreground mt-1">采购入库、日常领用、临期与补货在这里形成闭环</p>
         </div>
         <Dialog open={showAdd} onOpenChange={setShowAdd}>
           <DialogTrigger asChild>
@@ -142,7 +167,7 @@ export default function ProcurementPage() {
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle className="w-4 h-4 text-[#E88888]" />
             <h3 className="font-semibold text-foreground text-sm">保质期提醒</h3>
-            <Badge variant="secondary" className="bg-[#E88888]/10 text-[#E88888] text-xs">{expiringItems.length} 项即将到期</Badge>
+            <Badge variant="secondary" className="bg-[#E88888]/10 text-[#E88888] text-xs">{expiringItems.length} 项需处理</Badge>
           </div>
           <div className="space-y-2">
             {expiringItems.map(({ order, daysLeft, expiryDate }) => (
@@ -155,7 +180,7 @@ export default function ProcurementPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">到期 {expiryDate}</span>
                   <Badge className={cn('text-xs', daysLeft <= 3 ? 'bg-[#E88888] text-white' : 'bg-[#E88888]/20 text-[#E88888]')}>
-                    {daysLeft === 0 ? '今天到期' : `还剩 ${daysLeft} 天`}
+                    {expiryDaysLabel(daysLeft)}
                   </Badge>
                 </div>
               </div>
@@ -248,9 +273,9 @@ export default function ProcurementPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCard label="总采购额" value={`¥${summary.total.toLocaleString()}`} />
-        <SummaryCard label="订单总数" value={`${summary.count} 单`} />
-        <SummaryCard label="已到货" value={`${summary.delivered} 单`} accent="text-primary" />
+        <SummaryCard label="当前库存价值" value={`¥${summary.stockValue.toLocaleString()}`} />
+        <SummaryCard label="物资批次" value={`${summary.count} 批`} />
+        <SummaryCard label="需要补货" value={`${summary.lowStock} 项`} accent={summary.lowStock ? 'text-[#D4915E]' : 'text-primary-foreground'} />
         <SummaryCard label="进行中" value={`${summary.pending} 单`} accent="text-accent" />
       </div>
 
@@ -265,6 +290,15 @@ export default function ProcurementPage() {
             className="pl-9 bg-card"
           />
         </div>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger className="w-[150px] bg-card">
+            <SelectValue placeholder="全部分类" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部分类</SelectItem>
+            <InventoryCategoryOptions />
+          </SelectContent>
+        </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[140px] bg-card">
             <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
@@ -272,6 +306,9 @@ export default function ProcurementPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="low-stock">需要补货</SelectItem>
+            <SelectItem value="expiring">7 天内到期</SelectItem>
+            <SelectItem value="expired">已过期</SelectItem>
             <SelectItem value="pending">待发货</SelectItem>
             <SelectItem value="shipped">运输中</SelectItem>
             <SelectItem value="delivered">已到货</SelectItem>
@@ -302,7 +339,7 @@ export default function ProcurementPage() {
             <tbody>
               {filteredOrders.map(order => {
                 const remaining = order.quantity - order.consumed;
-                const ratio = remaining / order.quantity;
+                const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
                 return (
@@ -313,7 +350,14 @@ export default function ProcurementPage() {
                         <span className="font-medium text-foreground">{order.itemName}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{order.category}</td>
+                    <td className="px-4 py-3">
+                      <Select value={order.category} onValueChange={category => updateOrderCategory(order.id, category)}>
+                        <SelectTrigger size="sm" className="w-[116px] border-transparent bg-transparent px-2 shadow-none hover:border-input hover:bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent><InventoryCategoryOptions /></SelectContent>
+                      </Select>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -336,9 +380,9 @@ export default function ProcurementPage() {
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-muted-foreground" />
                           <span className="text-muted-foreground">{order.shelfLife}天</span>
-                          {expiry && expiry.daysLeft <= 7 && expiry.daysLeft >= 0 && (
+                          {expiry && expiry.daysLeft <= 7 && (
                             <Badge className="ml-1 text-[10px] px-1 py-0 bg-[#E88888]/15 text-[#E88888] border-0">
-                              {expiry.daysLeft === 0 ? '今天' : `${expiry.daysLeft}天`}
+                              {expiryDaysLabel(expiry.daysLeft, true)}
                             </Badge>
                           )}
                         </div>
@@ -369,6 +413,11 @@ export default function ProcurementPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
+                        {order.status === 'delivered' && remaining > 0 && (
+                          <Button variant="ghost" size="sm" onClick={() => setUsageOrder(order)} className="text-xs h-7 text-accent-foreground">
+                            <PackageMinus className="w-3.5 h-3.5 mr-1" />领用
+                          </Button>
+                        )}
                         {order.status === 'pending' && (
                           <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'shipped')} className="text-xs h-7">
                             标记发货
@@ -394,7 +443,52 @@ export default function ProcurementPage() {
           )}
         </div>
       </div>
+      {usageOrder && (
+        <UsageDialog
+          key={usageOrder.id}
+          order={usageOrder}
+          onClose={() => setUsageOrder(null)}
+          onConfirm={amount => {
+            recordOrderUsage(usageOrder.id, amount);
+            setUsageOrder(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function UsageDialog({ order, onClose, onConfirm }: { order: Order; onClose: () => void; onConfirm: (amount: number) => void }) {
+  const remaining = Math.max(0, order.quantity - order.consumed);
+  const suggested = order.dailyUsage && order.dailyUsage > 0 ? Math.min(order.dailyUsage, remaining) : Math.min(1, remaining);
+  const [amount, setAmount] = useState(String(suggested));
+  const parsedAmount = Number(amount);
+  const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount <= remaining;
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>记录库存领用</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-lg bg-muted/45 px-3 py-3">
+            <p className="text-sm font-medium text-foreground">{order.itemName}</p>
+            <p className="text-xs text-muted-foreground mt-1">当前可用 {remaining}{order.unit}</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>本次领用数量（{order.unit}）</Label>
+            <Input type="number" min="0" max={remaining} step="any" value={amount} onChange={event => setAmount(event.target.value)} autoFocus />
+            {!valid && amount !== '' && <p className="text-xs text-destructive">数量必须大于 0，且不能超过当前库存。</p>}
+          </div>
+          <p className="text-xs text-muted-foreground">确认后剩余 {valid ? Math.max(0, remaining - parsedAmount) : remaining}{order.unit}，补货提醒会自动重算。</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>取消</Button>
+            <Button disabled={!valid} onClick={() => onConfirm(parsedAmount)} className="bg-primary text-primary-foreground hover:bg-primary/90">确认领用</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -409,7 +503,7 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
 
 function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
-    itemName: '', category: '主粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
+    itemName: '', category: '猫粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', syncExpense: true,
     purchaseDate: new Date().toISOString().split('T')[0],
   });
@@ -457,11 +551,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Label>分类</Label>
             <Select value={form.category} onValueChange={v => setForm(p => ({ ...p, category: v }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {['干粮', '湿粮', '零食', '保健品', '药品', '用品', '玩具'].map(c => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
+              <SelectContent><InventoryCategoryOptions /></SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
@@ -487,7 +577,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Input type="number" value={form.unitPrice} onChange={e => setForm(p => ({ ...p, unitPrice: e.target.value }))} placeholder="0" />
           </div>
         </div>
-        {form.category !== '用品' && form.category !== '玩具' && (
+        {!['猫砂与清洁', '喂养用品', '洗护用品', '玩具', '居家用品', '外出用品', '其他用品'].includes(form.category) && (
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>生产日期</Label>

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { LLMClient, Config, HeaderUtils } from "coze-coding-dev-sdk";
 import { getSupabaseClient } from "@/storage/database/supabase-client";
+import { INVENTORY_CATEGORIES } from "@/lib/inventory-categories";
 
 interface ChatContentPart {
   type: "text" | "image_url";
@@ -26,7 +26,7 @@ const SYSTEM_PROMPT = `你是"钟福管理中控台"的智能助手，负责帮�
 
 ### 采购录入
 ---SYNC_DATA_START---
-{"type":"procurement","data":{"item_name":"物品名","category":"分类(food/supplies/health/daily)","quantity":数量,"unit":"单位","price":单价,"supplier":"供应商"}}
+{"type":"procurement","data":{"item_name":"物品名","category":"物品细分类","quantity":数量,"unit":"单位","price":单价,"supplier":"供应商"}}
 ---SYNC_DATA_END---
 
 ### 支出录入
@@ -39,14 +39,29 @@ const SYSTEM_PROMPT = `你是"钟福管理中控台"的智能助手，负责帮�
 {"type":"feeding","data":{"meal_type":"breakfast/lunch/dinner/snack","food_name":"食物名","amount":"用量","note":"备注"}}
 ---SYNC_DATA_END---
 
+### 喂食计划
+---SYNC_DATA_START---
+{"type":"feeding_plan","data":{"name":"计划名","active":true,"stages":[{"name":"阶段名","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","description":"说明","meals":[{"time":"08:00","food":"主粮45g","note":"备注"}],"supplements":"营养补充"}]}}
+---SYNC_DATA_END---
+
 ### 体重记录
 ---SYNC_DATA_START---
 {"type":"weight","data":{"weight":数值}}
 ---SYNC_DATA_END---
 
+### 每日健康观察
+---SYNC_DATA_START---
+{"type":"daily_observation","data":{"date":"YYYY-MM-DD","appetite":"great/normal/low/none","energy":"active/normal/quiet/poor","stool":"normal/soft/diarrhea/constipation/unseen","urine":"normal/less/frequent/abnormal/unseen","vomiting":"none/hairball/food/yellow/other","note":"补充说明"}}
+---SYNC_DATA_END---
+
+### 照护提醒
+---SYNC_DATA_START---
+{"type":"care_reminder","data":{"title":"提醒事项","date":"YYYY-MM-DD","time":"HH:mm","kind":"medication/deworming/vaccine/followup/care/other","repeat":"none/daily/weekly/monthly/yearly","note":"备注"}}
+---SYNC_DATA_END---
+
 ### 就医记录
 ---SYNC_DATA_START---
-{"type":"health_visit","data":{"reason":"原因","description":"描述","cost":费用}}
+{"type":"health_visit","data":{"reason":"原因","description":"描述","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD或空字符串","hospital":"医院","doctor":"医生","cost":费用}}
 ---SYNC_DATA_END---
 
 ## 规则
@@ -55,10 +70,16 @@ const SYSTEM_PROMPT = `你是"钟福管理中控台"的智能助手，负责帮�
 - 回复要友好自然，告知用户已录入什么数据
 - 如果用户只是闲聊或查询，不需要输出同步数据
 - 如果用户发了图片，仔细识别图片内容（物品、文字、数字等），并据此录入数据
-- 分类参考：food(猫粮/零食/罐头)、supplies(猫砂/玩具/日用品)、health(药品/保健品)、daily(日常用品)`;
+- 住院或连续治疗要提取开始和结束日期；用户只说持续天数时，根据开始日期计算包含首尾的结束日期
+- 用户要求制定、添加或修改喂食安排时，输出 feeding_plan；每个阶段至少包含一餐
+- 用户描述当天的食欲、精神、便便、排尿或呕吐情况时，输出 daily_observation
+- 用户说“提醒我”或提到未来的用药、驱虫、疫苗、复查日期时，输出 care_reminder
+- 采购分类必须从以下细分类中选择：${INVENTORY_CATEGORIES.join('、')}
+- 判断主食或零食时以包装上的营养用途为准；无法判断的湿粮优先根据用户原话追问，不要把包装形态当作营养用途`;
 
 export async function POST(request: NextRequest) {
   const { messages, image } = await request.json();
+  const { LLMClient, Config, HeaderUtils } = await import("coze-coding-dev-sdk");
   const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
 
   const config = new Config();

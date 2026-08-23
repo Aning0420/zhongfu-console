@@ -2,11 +2,14 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { loadState, saveState, type AppState, type Order, type FeedingRecord, type FeedingPlan, type HealthRecord, type Expense, type ChatMessage } from '@/lib/store';
+import { parseHealthDetail, serializeHealthDetail } from '@/lib/health-record-meta';
 
 interface AppContextType {
   state: AppState;
   addOrder: (order: Omit<Order, 'id'>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
+  updateOrderCategory: (id: string, category: string) => void;
+  recordOrderUsage: (id: string, amount: number) => void;
   deleteOrder: (id: string) => void;
   addFeedingRecord: (record: Omit<FeedingRecord, 'id'>) => void;
   updateFeedingRecord: (id: string, record: Partial<FeedingRecord>) => void;
@@ -16,8 +19,10 @@ interface AppContextType {
   updateFeedingPlan: (id: string, updates: Partial<Omit<FeedingPlan, 'id' | 'createdAt'>>) => void;
   deleteFeedingPlan: (id: string) => void;
   addHealthRecord: (record: Omit<HealthRecord, 'id'>) => void;
+  updateHealthRecord: (id: string, updates: Partial<Omit<HealthRecord, 'id'>>) => void;
   deleteHealthRecord: (id: string) => void;
   addExpense: (expense: Omit<Expense, 'id'>) => void;
+  updateExpense: (id: string, updates: Partial<Omit<Expense, 'id'>>) => void;
   deleteExpense: (id: string) => void;
   addChatMessages: (msgs: Omit<ChatMessage, 'id'>[]) => void;
   clearChatMessages: () => void;
@@ -64,15 +69,20 @@ function rowToFeedingRecord(row: Record<string, unknown>): FeedingRecord {
 }
 
 function rowToHealthRecord(row: Record<string, unknown>): HealthRecord {
+  const rawDetail = (row.detail as string) || '';
+  const { detail, meta } = parseHealthDetail(rawDetail);
   return {
     id: row.id as string,
     date: row.date as string,
     type: row.type as HealthRecord['type'],
     title: row.title as string,
-    detail: (row.detail as string) || '',
+    detail,
+    endDate: meta.endDate,
     weight: row.weight ? parseFloat(row.weight as string) : undefined,
     hospital: row.hospital as string | undefined,
     doctor: row.doctor as string | undefined,
+    observation: meta.observation,
+    reminder: meta.reminder,
   };
 }
 
@@ -139,11 +149,12 @@ async function loadFromCloud(): Promise<AppState | null> {
       healthRecords: (json.healthRecords || []).map(rowToHealthRecord),
       expenses: (json.expenses || []).map(rowToExpense),
       chatMessages: [],
-      feedingPlans: (json.feedingPlans || []).map((p: any) => ({
-        ...p,
-        startDate: p.start_date,
-        endDate: p.end_date,
-        stages: p.stages ? JSON.parse(p.stages) : [],
+      feedingPlans: (json.feedingPlans || []).map((row: Record<string, unknown>): FeedingPlan => ({
+        id: row.id as string,
+        name: row.name as string,
+        active: row.active === true || row.active === 1,
+        createdAt: (row.created_at as string) || new Date().toISOString(),
+        stages: typeof row.stages === 'string' ? JSON.parse(row.stages) : (row.stages as FeedingPlan['stages']) || [],
       })),
     };
   } catch {
@@ -214,6 +225,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       orders: prev.orders.map(o => o.id === id ? { ...o, status } : o),
     }));
     updateInCloud('orders', id, { status });
+  }, []);
+
+  const updateOrderCategory = useCallback((id: string, category: string) => {
+    setState(prev => ({
+      ...prev,
+      orders: prev.orders.map(order => order.id === id ? { ...order, category } : order),
+    }));
+    updateInCloud('orders', id, { category });
+  }, []);
+
+  const recordOrderUsage = useCallback((id: string, amount: number) => {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    setState(prev => {
+      const order = prev.orders.find(item => item.id === id);
+      if (!order) return prev;
+
+      const consumed = Math.min(order.quantity, order.consumed + amount);
+      updateInCloud('orders', id, { consumed });
+
+      return {
+        ...prev,
+        orders: prev.orders.map(item => item.id === id ? { ...item, consumed } : item),
+      };
+    });
   }, []);
 
   const deleteOrder = useCallback((id: string) => {
@@ -295,7 +331,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...prev,
       feedingPlans: prev.feedingPlans.map(p => p.id === id ? { ...p, ...updates } : p),
     }));
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.stages !== undefined) updateData.stages = JSON.stringify(updates.stages);
     if (updates.active !== undefined) updateData.active = updates.active ? 1 : 0;
@@ -317,10 +353,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       date: record.date,
       type: record.type,
       title: record.title,
-      detail: record.detail,
+      detail: serializeHealthDetail(record),
       weight: record.weight?.toString() || null,
       hospital: record.hospital || null,
       doctor: record.doctor || null,
+    });
+  }, []);
+
+  const updateHealthRecord = useCallback((id: string, updates: Partial<Omit<HealthRecord, 'id'>>) => {
+    setState(prev => {
+      const existing = prev.healthRecords.find(record => record.id === id);
+      if (!existing) return prev;
+      const nextRecord = { ...existing, ...updates };
+      updateInCloud('health_records', id, {
+        date: nextRecord.date,
+        type: nextRecord.type,
+        title: nextRecord.title,
+        detail: serializeHealthDetail(nextRecord),
+        weight: nextRecord.weight?.toString() || null,
+        hospital: nextRecord.hospital || null,
+        doctor: nextRecord.doctor || null,
+      });
+      return {
+        ...prev,
+        healthRecords: prev.healthRecords.map(record => record.id === id ? nextRecord : record),
+      };
     });
   }, []);
 
@@ -341,6 +398,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       amount: expense.amount.toString(),
       description: expense.description,
       related_module: expense.relatedModule,
+    });
+  }, []);
+
+  const updateExpense = useCallback((id: string, updates: Partial<Omit<Expense, 'id'>>) => {
+    setState(prev => {
+      const existing = prev.expenses.find(expense => expense.id === id);
+      if (!existing) return prev;
+      const nextExpense = { ...existing, ...updates };
+      updateInCloud('expenses', id, {
+        date: nextExpense.date,
+        category: nextExpense.category,
+        amount: nextExpense.amount.toString(),
+        description: nextExpense.description,
+        related_module: nextExpense.relatedModule,
+      });
+      return {
+        ...prev,
+        expenses: prev.expenses.map(expense => expense.id === id ? nextExpense : expense),
+      };
     });
   }, []);
 
@@ -386,7 +462,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, deleteOrder, addFeedingRecord, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, deleteHealthRecord, addExpense, deleteExpense, addChatMessages, clearChatMessages }}>
+    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, updateOrderCategory, recordOrderUsage, deleteOrder, addFeedingRecord, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages }}>
       {children}
     </AppContext.Provider>
   );
