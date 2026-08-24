@@ -372,7 +372,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     <>
       {/* Dialog */}
       {open && (
-        <div className="fixed bottom-6 right-6 w-[400px] h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-[#D6E8F5] animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <div className="fixed inset-x-3 bottom-3 z-50 flex h-[min(600px,calc(100dvh-24px))] w-auto flex-col rounded-lg border border-[#D6E8F5] bg-white shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:h-[600px] sm:w-[400px]">
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-[#D6E8F5]">
             <div className="flex items-center gap-2">
