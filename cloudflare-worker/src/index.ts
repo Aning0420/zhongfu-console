@@ -169,17 +169,20 @@ function addDays(date: string, days: number): string {
 }
 
 function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null {
-  const planName = text.match(/计划名称\s*[:：]\s*([^\n]+)/)?.[1]?.trim();
-  const stagePattern = /^\s*阶段\s*(\d+)\s*[:：]\s*([^\n]+)/gm;
-  const matches = [...text.matchAll(stagePattern)];
-  if (!planName || matches.length < 2) return null;
+  const normalized = text.replace(/\r\n?/g, '\n').replace(/[–—−]/g, '-');
+  const planName = normalized.match(
+    /计划名称\s*[:：]\s*(.*?)(?=\s*(?:固定喂食时间|计划周期|阶段\s*1)\s*[:：]|\n|$)/
+  )?.[1]?.trim() || '钟福喂食计划';
+  const stagePattern = /(?:^|\n|[ \t])阶段\s*(\d+)\s*[:：]\s*(.*?)(?=\s*(?:(?:开始日期|日期)\s*[:：]|\n|$))/g;
+  const matches = [...normalized.matchAll(stagePattern)];
+  if (matches.length === 0) return null;
 
   const fixedTimes = [...new Set(
-    [...text.slice(0, matches[0].index).matchAll(/(?:^|\n)\s*(\d{2}:\d{2})\s+(?:早餐|午餐|晚餐)/g)]
+    [...normalized.slice(0, matches[0].index).matchAll(/(\d{2}:\d{2})\s+(?:早餐|午餐|晚餐)/g)]
       .map(match => match[1])
   )];
   const mealTimes = fixedTimes.length > 0 ? fixedTimes : ['08:00', '13:00', '22:00'];
-  const prelude = text.slice(0, matches[0].index)
+  const prelude = normalized.slice(0, matches[0].index)
     .replace(/^\s*计划名称[^\n]*\n?/m, '')
     .replace(/^\s*固定喂食时间[^\n]*\n?/m, '')
     .replace(/^\s*[-*]?\s*\d{2}:\d{2}\s+(?:早餐|午餐|晚餐)\s*$/gm, '')
@@ -189,8 +192,8 @@ function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null 
   const today = toIsoDate(new Date());
   const stages = matches.map((match, index) => {
     const blockStart = match.index ?? 0;
-    const blockEnd = matches[index + 1]?.index ?? text.length;
-    const block = text.slice(blockStart, blockEnd).replace(/\\\s*$/gm, '').trim();
+    const blockEnd = matches[index + 1]?.index ?? normalized.length;
+    const block = normalized.slice(blockStart, blockEnd).replace(/\\\s*$/gm, '').trim();
     const explicitDates = block.match(/\d{4}-\d{2}-\d{2}/g) || [];
     const startDate = explicitDates[0] || (previousEnd ? addDays(previousEnd, 1) : today);
 
@@ -205,7 +208,9 @@ function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null 
       || (index === matches.length - 1 ? '2099-12-31' : addDays(startDate, duration - 1));
     previousEnd = endDate;
 
-    const timedMeals = [...block.matchAll(/^\s*(\d{2}:\d{2})\s*[｜|]\s*(.+)$/gm)].map(value => {
+    const timedMeals = [...block.matchAll(
+      /(?:^|\n|\s)(\d{2}:\d{2})\s*[｜|]\s*([^\n]*?)(?=\s+(?:\d{2}:\d{2}\s*[｜|]|营养补充\s*[:：]|阶段说明\s*[:：]|进入条件\s*[:：]|设为当前计划\s*[:：])|\n|$)/g
+    )].map(value => {
       const parts = value[2].split(/[｜|]/).map(part => part.trim()).filter(Boolean);
       return {
         time: value[1],
@@ -236,7 +241,7 @@ function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null 
 
   return {
     name: planName,
-    active: /设为当前计划\s*[:：]\s*是/.test(text),
+    active: /设为当前计划\s*[:：]\s*是/.test(normalized),
     stages,
   };
 }
@@ -358,14 +363,14 @@ const worker = {
           ...history,
         ];
         for (let attempt = 0; attempt < 3; attempt += 1) {
-          const structuredResult = await env.AI.run(STRUCTURED_MODEL, {
-            messages: structuredMessages,
-            response_format: { type: 'json_schema', json_schema: FEEDING_PLAN_SCHEMA },
-            max_tokens: 1200,
-            temperature: 0,
-            seed: 42 + attempt,
-          });
           try {
+            const structuredResult = await env.AI.run(STRUCTURED_MODEL, {
+              messages: structuredMessages,
+              response_format: { type: 'json_schema', json_schema: FEEDING_PLAN_SCHEMA },
+              max_tokens: 1200,
+              temperature: 0,
+              seed: 42 + attempt,
+            });
             return sseResponse(formatFeedingPlanResult(structuredResult), origin);
           } catch {
             if (attempt === 2) throw new Error('饮食计划没有完整解析，请重新发送一次');

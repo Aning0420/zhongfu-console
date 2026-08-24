@@ -348,7 +348,16 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         signal: controller.signal,
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let message = `助手服务暂时不可用（${res.status}）`;
+        try {
+          const body = await res.json() as { error?: string };
+          if (body.error) message = body.error;
+        } catch {
+          // Keep the readable status message when the server did not return JSON.
+        }
+        throw new Error(message);
+      }
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No reader');
