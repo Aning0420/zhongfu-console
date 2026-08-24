@@ -285,6 +285,8 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     setPendingImage(null);
 
     let savedAssistantContent = '';
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 45_000);
     try {
       // Build message history for API
       const apiMessages = messages
@@ -297,6 +299,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: apiMessages, image }),
+        signal: controller.signal,
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -306,45 +309,55 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
       const decoder = new TextDecoder();
       let fullText = '';
+      let lineBuffer = '';
+      let receivedPayload = false;
+
+      const processLine = (line: string) => {
+        if (!line.startsWith('data: ')) return;
+        const payload = line.slice(6).trim();
+        if (!payload || payload === '[DONE]') return;
+
+        try {
+          const data = JSON.parse(payload);
+          receivedPayload = true;
+          if (data.text) {
+            fullText += data.text;
+            const displayText = fullText
+              .replace(/---SYNC_DATA_START---[\s\S]*?---SYNC_DATA_END---/g, '')
+              .trim();
+            savedAssistantContent = displayText;
+            setMessages(prev =>
+              prev.map(m => m.id === assistantMsgId ? { ...m, content: displayText } : m)
+            );
+          }
+          if (data.syncData) {
+            syncData(data.syncData);
+            setMessages(prev =>
+              prev.map(m => m.id === assistantMsgId ? { ...m, synced: true } : m)
+            );
+          }
+        } catch {
+          // A complete SSE line should always contain valid JSON.
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split('\n');
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6).trim();
-          if (payload === '[DONE]') continue;
-
-          try {
-            const data = JSON.parse(payload);
-            if (data.text) {
-              fullText += data.text;
-              // Clean sync data markers from display
-              const displayText = fullText
-                .replace(/---SYNC_DATA_START---[\s\S]*?---SYNC_DATA_END---/g, '')
-                .trim();
-              savedAssistantContent = displayText;
-              setMessages(prev =>
-                prev.map(m => m.id === assistantMsgId ? { ...m, content: displayText } : m)
-              );
-            }
-            if (data.syncData) {
-              syncData(data.syncData);
-              setMessages(prev =>
-                prev.map(m => m.id === assistantMsgId ? { ...m, synced: true } : m)
-              );
-            }
-          } catch {
-            // Skip malformed chunks
-          }
-        }
+        lineBuffer += decoder.decode(value, { stream: true });
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() || '';
+        lines.forEach(processLine);
       }
+
+      lineBuffer += decoder.decode();
+      if (lineBuffer) processLine(lineBuffer);
+      if (!receivedPayload) throw new Error('助手返回内容不完整，请重试');
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : '网络错误';
+      const errMsg = err instanceof DOMException && err.name === 'AbortError'
+        ? '处理时间过长，请缩短计划或分阶段发送'
+        : err instanceof Error ? err.message : '网络错误';
       savedAssistantContent = `抱歉，出了点问题：${errMsg}`;
       setMessages(prev =>
         prev.map(m => m.id === assistantMsgId
@@ -357,6 +370,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         { role: 'user', content: content.trim() || '[图片消息]', timestamp: userMsg.timestamp.toISOString() },
         { role: 'assistant', content: savedAssistantContent, timestamp: assistantMsg.timestamp.toISOString() },
       ]);
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   }, [messages, syncData, addChatMessages]);

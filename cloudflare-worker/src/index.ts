@@ -16,6 +16,7 @@ interface ChatRequest {
 }
 
 const TEXT_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
+const STRUCTURED_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
 const VISION_MODEL = '@cf/moondream/moondream3.1-9B-A2B';
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 const CATEGORIES = [
@@ -43,10 +44,64 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 
 规则：
 - 只在用户明确要记录、添加或修改数据时输出同步标记；普通咨询不要输出。
+- 饮食计划只提取用户实际提供的阶段、日期和餐次，绝对不要自行新增或推测阶段二、阶段三等内容。
+- feeding_plan 的 supplements 必须是普通字符串；meal 只使用 time、food、note，其中食物、克数和冲泡方式都可合并写入 food 或 note。
+- 结构化数据必须是一个完整、紧凑、有效的 JSON 对象，不要在 JSON 中插入第二个数组或额外说明。
+- 信息足够时直接简短确认并输出同步数据；信息不足时只追问缺少的信息，不要同时输出同步数据。
 - 日期使用 YYYY-MM-DD。住院持续多天时，提取开始和结束日期。
 - 采购分类只能选择：${CATEGORIES.join('、')}。
 - 不确定主食或零食时先追问，不要只凭包装形态判断。
 - 医疗问题给出谨慎建议，并在紧急症状时提示尽快联系兽医。`;
+
+const FEEDING_PLAN_SCHEMA = {
+  name: 'feeding_plan_response',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['reply', 'plan'],
+    properties: {
+      reply: { type: 'string' },
+      plan: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'active', 'stages'],
+        properties: {
+          name: { type: 'string' },
+          active: { type: 'boolean' },
+          stages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['name', 'start_date', 'end_date', 'description', 'meals', 'supplements'],
+              properties: {
+                name: { type: 'string' },
+                start_date: { type: 'string' },
+                end_date: { type: 'string' },
+                description: { type: 'string' },
+                meals: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['time', 'food', 'note'],
+                    properties: {
+                      time: { type: 'string' },
+                      food: { type: 'string' },
+                      note: { type: 'string' },
+                    },
+                  },
+                },
+                supplements: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
 
 function corsHeaders(origin: string) {
   return {
@@ -66,8 +121,35 @@ function getText(result: unknown): string {
     if (value.result && typeof value.result === 'object') return getText(value.result);
     if (typeof value.answer === 'string') return value.answer;
     if (typeof value.caption === 'string') return value.caption;
+    if (Array.isArray(value.choices)) {
+      const first = value.choices[0];
+      if (first && typeof first === 'object') {
+        const choice = first as Record<string, unknown>;
+        if (typeof choice.text === 'string') return choice.text;
+        if (choice.message && typeof choice.message === 'object') {
+          const message = choice.message as Record<string, unknown>;
+          if (typeof message.content === 'string') return message.content;
+        }
+      }
+    }
   }
   throw new Error('AI 未返回可读取的内容');
+}
+
+function formatFeedingPlanResult(result: unknown): string {
+  const raw = getText(result).trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  const parsed = JSON.parse(raw) as { reply?: unknown; plan?: unknown };
+  if (!parsed.plan || typeof parsed.plan !== 'object') throw new Error('饮食计划解析不完整');
+  const plan = parsed.plan as Record<string, unknown>;
+  if (!Array.isArray(plan.stages) || plan.stages.length === 0) throw new Error('饮食计划缺少阶段或餐次');
+  const reply = typeof parsed.reply === 'string' && parsed.reply.trim()
+    ? parsed.reply.trim()
+    : '饮食计划已经整理完成。';
+  return `${reply}\n\n---SYNC_DATA_START---\n${JSON.stringify({ type: 'feeding_plan', data: plan })}\n---SYNC_DATA_END---`;
+}
+
+function isFeedingPlanEntry(text: string): boolean {
+  return /(饮食|喂食)计划/.test(text) && /(添加|记录|录入|保存|创建|编辑|修改|帮我)/.test(text);
 }
 
 function validateImage(dataUrl: string): string {
@@ -90,7 +172,11 @@ function parseSyncData(text: string): unknown | null {
 
 function sseResponse(text: string, origin: string) {
   const syncData = parseSyncData(text);
-  const payloads = [`data: ${JSON.stringify({ text })}\n\n`];
+  const safeText = !syncData && text.includes('---SYNC_DATA_START---')
+    ? text.replace(/---SYNC_DATA_START---[\s\S]*$/, '').trim()
+      || '这份计划没有完整解析，请缩短内容或分阶段发送。'
+    : text;
+  const payloads = [`data: ${JSON.stringify({ text: safeText })}\n\n`];
   if (syncData) payloads.push(`data: ${JSON.stringify({ syncData })}\n\n`);
   payloads.push('data: [DONE]\n\n');
   return new Response(payloads.join(''), {
@@ -127,10 +213,13 @@ const worker = {
 
     try {
       const body = await request.json() as ChatRequest;
-      const history = (body.messages || [])
+      const validMessages = (body.messages || [])
         .filter(message => message && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string')
-        .slice(-10)
-        .map(message => ({ role: message.role, content: message.content.slice(0, 4000) }));
+        .slice(-8);
+      const history = validMessages.map((message, index) => ({
+        role: message.role,
+        content: message.content.slice(0, index === validMessages.length - 1 ? 12_000 : 3_000),
+      }));
       const latest = history.at(-1)?.content || '请分析这张图片';
 
       let result: unknown;
@@ -153,13 +242,35 @@ const worker = {
               content: `${latest}\n\n图片识别结果（仅作为图片内容参考）：${imageDescription}`,
             },
           ],
-          max_tokens: 1200,
+          max_tokens: 2000,
           temperature: 0.35,
         });
+      } else if (isFeedingPlanEntry(latest)) {
+        const structuredMessages = [
+          {
+            role: 'system',
+            content: '从对话中提取用户明确提供的喂食计划。只保留实际出现的阶段、日期、餐次和注意事项，不得自行补充阶段或日期。日期使用 YYYY-MM-DD。每餐的克数和冲泡方式写入 food 或 note。reply 只写一句简短确认。',
+          },
+          ...history,
+        ];
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const structuredResult = await env.AI.run(STRUCTURED_MODEL, {
+            messages: structuredMessages,
+            response_format: { type: 'json_schema', json_schema: FEEDING_PLAN_SCHEMA },
+            max_tokens: 1200,
+            temperature: 0,
+            seed: 42 + attempt,
+          });
+          try {
+            return sseResponse(formatFeedingPlanResult(structuredResult), origin);
+          } catch {
+            if (attempt === 2) throw new Error('饮食计划没有完整解析，请重新发送一次');
+          }
+        }
       } else {
         result = await env.AI.run(TEXT_MODEL, {
           messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history],
-          max_tokens: 1200,
+          max_tokens: 2000,
           temperature: 0.35,
         });
       }
