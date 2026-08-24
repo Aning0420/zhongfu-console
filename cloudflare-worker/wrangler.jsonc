@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "zhongfu-assistant",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "workers_dev": true,
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "ALLOWED_ORIGIN": "https://aning0420.github.io"
+  }
+}

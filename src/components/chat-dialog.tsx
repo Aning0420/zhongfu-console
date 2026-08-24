@@ -22,6 +22,8 @@ const QUICK_REPLIES = [
   '今天喂食了吗',
 ];
 const STATIC_MODE = process.env.NEXT_PUBLIC_STATIC_MODE === '1';
+const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '/api/chat';
+const AI_ENABLED = !STATIC_MODE || Boolean(process.env.NEXT_PUBLIC_CHAT_API_URL);
 
 let _msgId = 5000;
 function genMsgId(): string {
@@ -50,7 +52,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
   useEffect(() => {
     if (!open || historyLoaded) return;
-    if (STATIC_MODE) {
+    if (!AI_ENABLED) {
       setMessages([]);
       setHistoryLoaded(true);
       return;
@@ -257,7 +259,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
   // Send message with streaming
   const sendMessage = useCallback(async (content: string, image?: string) => {
-    if (STATIC_MODE) return;
+    if (!AI_ENABLED) return;
     if (!content.trim() && !image) return;
     setLoading(true);
 
@@ -291,7 +293,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         .map(m => ({ role: m.role, content: m.content }));
       apiMessages.push({ role: 'user' as const, content: content.trim() });
 
-      const res = await fetch('/api/chat', {
+      const res = await fetch(CHAT_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: apiMessages, image }),
@@ -380,7 +382,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 <Sparkles className="w-4 h-4 text-white" />
               </div>
               <span className="font-semibold text-[#2D3E50]">智能助手</span>
-              <span className="text-[10px] text-[#6B8A9E] bg-[#E8F4FD] px-1.5 py-0.5 rounded-full">{STATIC_MODE ? '本机版' : 'AI'}</span>
+              <span className="text-[10px] text-[#6B8A9E] bg-[#E8F4FD] px-1.5 py-0.5 rounded-full">AI</span>
             </div>
             <div className="flex items-center gap-1">
               {messages.length > 0 && (
@@ -408,7 +410,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 <div className="w-16 h-16 rounded-full bg-[#89CFF0]/20 flex items-center justify-center mx-auto mb-4">
                   <Sparkles className="w-8 h-8 text-[#5CB8E4]" />
                 </div>
-                {STATIC_MODE ? (
+                {!AI_ENABLED ? (
                   <>
                     <p className="mb-1 text-sm text-[#6B8A9E]">AI 助手暂不可用</p>
                     <p className="mx-auto max-w-[260px] text-xs leading-5 text-[#6B8A9E]/70">当前入口优先保证手机能打开和本机记录。采购、喂食、健康、体重与支出仍可正常手动添加。</p>
@@ -473,7 +475,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           </div>
 
           {/* Quick replies */}
-          {messages.length === 0 && !STATIC_MODE && (
+          {messages.length === 0 && AI_ENABLED && (
             <div className="px-4 pb-2 flex flex-wrap gap-2">
               {QUICK_REPLIES.map((text) => (
                 <button
@@ -518,7 +520,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={STATIC_MODE}
+                disabled={!AI_ENABLED}
                 className="w-9 h-9 rounded-full hover:bg-[#E8F4FD] text-[#6B8A9E] hover:text-[#5CB8E4] transition-colors flex items-center justify-center shrink-0"
                 title="上传图片"
               >
@@ -535,13 +537,13 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                   }
                 }}
                 onPaste={handlePaste}
-                placeholder={STATIC_MODE ? '请使用各页面或“记录”按钮添加数据' : '说点什么...（可粘贴图片）'}
+                placeholder={AI_ENABLED ? '说点什么...（可粘贴图片）' : '请使用各页面或“记录”按钮添加数据'}
                 className="flex-1 bg-[#E8F4FD] rounded-full px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#89CFF0] transition-shadow"
-                disabled={loading || STATIC_MODE}
+                disabled={loading || !AI_ENABLED}
               />
               <button
                 onClick={handleSubmit}
-                disabled={STATIC_MODE || loading || (!input.trim() && !pendingImage)}
+                disabled={!AI_ENABLED || loading || (!input.trim() && !pendingImage)}
                 className={cn(
                   'w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all',
                   input.trim() || pendingImage

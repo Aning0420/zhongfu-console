@@ -20,6 +20,7 @@ cd "$PROJECT_ROOT"
 ZHONGFU_STATIC_EXPORT=1 \
 NEXT_PUBLIC_STATIC_MODE=1 \
 NEXT_PUBLIC_BASE_PATH=/zhongfu-console \
+NEXT_PUBLIC_CHAT_API_URL=https://zhongfu-assistant-pages.pages.dev/api/chat \
 pnpm next build --webpack
 
 touch "$PROJECT_ROOT/out/.nojekyll"
