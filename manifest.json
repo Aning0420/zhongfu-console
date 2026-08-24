@@ -1,0 +1,50 @@
+{
+  "id": "./",
+  "name": "钟福供养办事处",
+  "short_name": "钟福供养",
+  "description": "钟福的采购、喂食、健康与支出管理应用",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#FFF9F7",
+  "theme_color": "#B0E0E6",
+  "categories": ["lifestyle", "health", "utilities"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "zhongfu-cat-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "zhongfu-cat-app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "记录喂食",
+      "short_name": "喂食",
+      "url": "feeding/",
+      "icons": [{ "src": "zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "健康管理",
+      "short_name": "健康",
+      "url": "health/",
+      "icons": [{ "src": "zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "快速记账",
+      "short_name": "支出",
+      "url": "expenses/",
+      "icons": [{ "src": "zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}
