@@ -5,7 +5,7 @@ import { normalizeInventoryCategory } from '@/lib/inventory-categories';
 import { X, Send, ImagePlus, Trash2, Sparkles } from 'lucide-react';
 import { useAppContext } from './providers';
 import { cn } from '@/lib/utils';
-import type { CareReminder, DailyObservation } from '@/lib/store';
+import type { AppState, CareReminder, DailyObservation } from '@/lib/store';
 
 interface DisplayMessage {
   id: string;
@@ -34,6 +34,49 @@ function genMsgId(): string {
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   const candidate = String(value || '');
   return allowed.includes(candidate as T) ? candidate as T : fallback;
+}
+
+function buildAssistantContext(state: AppState): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const latestWeight = state.healthRecords
+    .filter(record => record.type === 'weight' && typeof record.weight === 'number')
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+  const activePlan = state.feedingPlans.find(plan => plan.active);
+  const activeStage = activePlan?.stages.find(stage => stage.startDate <= today && stage.endDate >= today);
+  const inventory = state.orders
+    .filter(order => order.status !== 'cancelled' && order.quantity - order.consumed > 0)
+    .slice(-20)
+    .map(order => ({ item: order.itemName, category: order.category, remaining: order.quantity - order.consumed, unit: order.unit }));
+  const recentHealth = [...state.healthRecords]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 8)
+    .map(record => ({ date: record.date, type: record.type, title: record.title, detail: record.detail, weight: record.weight }));
+  const todayFeeding = state.feedingRecords
+    .filter(record => record.date === today)
+    .map(record => ({ meal: record.mealType, food: record.foodName, amount: record.amount, remaining: record.remainingAmount, completed: record.completed, note: record.note }));
+  const monthExpense = state.expenses
+    .filter(expense => expense.date.startsWith(month))
+    .reduce((total, expense) => total + expense.amount, 0);
+
+  return JSON.stringify({
+    today,
+    latestWeight: latestWeight ? { date: latestWeight.date, kg: latestWeight.weight } : null,
+    activeFeedingPlan: activePlan ? {
+      name: activePlan.name,
+      currentStage: activeStage ? {
+        name: activeStage.name,
+        dates: `${activeStage.startDate}至${activeStage.endDate}`,
+        meals: activeStage.mealSchedule,
+        supplements: activeStage.supplements,
+        description: activeStage.description.slice(0, 2_000),
+      } : null,
+    } : null,
+    todayFeeding,
+    inventory,
+    recentHealth,
+    monthExpense,
+  });
 }
 
 export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -130,6 +173,9 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           mealType: (String(d.meal_type) || 'snack') as 'breakfast' | 'lunch' | 'dinner' | 'snack',
           foodName: String(d.food_name || '猫粮'),
           amount: String(d.amount || ''),
+          remainingAmount: d.remaining_amount === undefined || d.remaining_amount === null
+            ? undefined
+            : String(d.remaining_amount),
           completed: true,
           note: String(d.note || ''),
         });
@@ -298,7 +344,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       const res = await fetch(CHAT_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, image }),
+        body: JSON.stringify({ messages: apiMessages, image, context: buildAssistantContext(state) }),
         signal: controller.signal,
       });
 
@@ -373,7 +419,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       window.clearTimeout(timeoutId);
       setLoading(false);
     }
-  }, [messages, syncData, addChatMessages]);
+  }, [messages, state, syncData, addChatMessages]);
 
   const handleSubmit = useCallback(() => {
     sendMessage(input, pendingImage || undefined);

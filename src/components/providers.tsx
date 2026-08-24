@@ -1,7 +1,24 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { loadState, saveState, type AppState, type Order, type FeedingRecord, type FeedingPlan, type HealthRecord, type Expense, type ChatMessage } from '@/lib/store';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { loadState, parseBackup, saveState, type AppState, type Order, type FeedingRecord, type FeedingPlan, type HealthRecord, type Expense, type ChatMessage } from '@/lib/store';
+import {
+  clearStoredSyncKey,
+  cloudSyncAvailable,
+  fetchCloudSnapshot,
+  generateSyncKey,
+  getStoredSyncKey,
+  saveCloudSnapshot,
+  storeSyncKey,
+} from '@/lib/cloud-sync';
+
+export interface SyncInfo {
+  available: boolean;
+  key: string;
+  status: 'off' | 'connecting' | 'syncing' | 'synced' | 'offline' | 'error';
+  lastSyncedAt: string;
+  error: string;
+}
 
 interface AppContextType {
   state: AppState;
@@ -11,6 +28,7 @@ interface AppContextType {
   recordOrderUsage: (id: string, amount: number) => void;
   deleteOrder: (id: string) => void;
   addFeedingRecord: (record: Omit<FeedingRecord, 'id'>) => void;
+  syncPlannedFeedingRecords: (date: string, planId: string, records: Omit<FeedingRecord, 'id'>[]) => void;
   updateFeedingRecord: (id: string, record: Partial<FeedingRecord>) => void;
   deleteFeedingRecord: (id: string) => void;
   toggleFeedingComplete: (id: string) => void;
@@ -26,6 +44,11 @@ interface AppContextType {
   addChatMessages: (msgs: Omit<ChatMessage, 'id'>[]) => void;
   clearChatMessages: () => void;
   restoreState: (nextState: AppState) => void;
+  syncInfo: SyncInfo;
+  createCloudSync: () => Promise<string>;
+  connectCloudSync: (key: string) => Promise<'created' | 'connected'>;
+  disconnectCloudSync: () => void;
+  syncNow: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -46,17 +69,161 @@ export function AppProvider({ children }: { children: ReactNode }) {
     chatMessages: [],
   });
   const [loaded, setLoaded] = useState(false);
+  const [syncInfo, setSyncInfo] = useState<SyncInfo>({
+    available: false,
+    key: '',
+    status: 'off',
+    lastSyncedAt: '',
+    error: '',
+  });
+  const stateRef = useRef(state);
+  const syncKeyRef = useRef('');
+  const syncReadyRef = useRef(false);
+  const suppressUploadRef = useRef(false);
+  const uploadTimerRef = useRef<number | null>(null);
+  const uploadingRef = useRef(false);
+  const revisionRef = useRef(0);
 
-  // All personal data stays in this browser/PWA installation.
   useEffect(() => {
-    setState(loadState());
+    const initialState = loadState();
+    const storedKey = getStoredSyncKey();
+    stateRef.current = initialState;
+    syncKeyRef.current = storedKey;
+    setState(initialState);
+    setSyncInfo({
+      available: cloudSyncAvailable(),
+      key: storedKey,
+      status: storedKey ? 'connecting' : 'off',
+      lastSyncedAt: '',
+      error: '',
+    });
     setLoaded(true);
   }, []);
 
-  // Save immediately after every local change.
+  const applyCloudState = useCallback((data: AppState, revision: number, updatedAt: string) => {
+    const validated = parseBackup(JSON.stringify(data));
+    suppressUploadRef.current = true;
+    revisionRef.current = revision;
+    stateRef.current = validated;
+    saveState(validated);
+    setState(validated);
+    setSyncInfo(current => ({ ...current, status: 'synced', lastSyncedAt: updatedAt, error: '' }));
+  }, []);
+
+  const pushCurrentState = useCallback(async () => {
+    const key = syncKeyRef.current;
+    if (!key || !syncReadyRef.current || uploadingRef.current) return;
+    uploadingRef.current = true;
+    setSyncInfo(current => ({ ...current, status: 'syncing', error: '' }));
+    try {
+      const result = await saveCloudSnapshot(key, stateRef.current);
+      revisionRef.current = result.revision;
+      setSyncInfo(current => ({ ...current, status: 'synced', lastSyncedAt: result.updatedAt, error: '' }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '云同步失败';
+      setSyncInfo(current => ({ ...current, status: navigator.onLine ? 'error' : 'offline', error: message }));
+      throw error;
+    } finally {
+      uploadingRef.current = false;
+    }
+  }, []);
+
+  const connectCloudSync = useCallback(async (rawKey: string): Promise<'created' | 'connected'> => {
+    const key = storeSyncKey(rawKey);
+    syncKeyRef.current = key;
+    syncReadyRef.current = false;
+    setSyncInfo(current => ({ ...current, available: true, key, status: 'connecting', error: '' }));
+    try {
+      const remote = await fetchCloudSnapshot(key);
+      if (remote) {
+        applyCloudState(remote.data, remote.revision, remote.updatedAt);
+        syncReadyRef.current = true;
+        return 'connected';
+      }
+
+      const result = await saveCloudSnapshot(key, stateRef.current);
+      revisionRef.current = result.revision;
+      syncReadyRef.current = true;
+      setSyncInfo(current => ({ ...current, status: 'synced', lastSyncedAt: result.updatedAt, error: '' }));
+      return 'created';
+    } catch (error) {
+      syncReadyRef.current = false;
+      const message = error instanceof Error ? error.message : '无法连接云同步';
+      setSyncInfo(current => ({ ...current, status: navigator.onLine ? 'error' : 'offline', error: message }));
+      throw error;
+    }
+  }, [applyCloudState]);
+
+  const createCloudSync = useCallback(async () => {
+    const key = generateSyncKey();
+    await connectCloudSync(key);
+    return key;
+  }, [connectCloudSync]);
+
+  const disconnectCloudSync = useCallback(() => {
+    if (uploadTimerRef.current !== null) window.clearTimeout(uploadTimerRef.current);
+    uploadTimerRef.current = null;
+    syncReadyRef.current = false;
+    syncKeyRef.current = '';
+    revisionRef.current = 0;
+    clearStoredSyncKey();
+    setSyncInfo(current => ({ ...current, key: '', status: 'off', lastSyncedAt: '', error: '' }));
+  }, []);
+
+  const syncNow = useCallback(async () => {
+    if (!syncKeyRef.current) throw new Error('请先开启云同步');
+    await pushCurrentState();
+  }, [pushCurrentState]);
+
   useEffect(() => {
-    if (loaded) saveState(state);
-  }, [state, loaded]);
+    if (!loaded || !syncInfo.key || syncReadyRef.current) return;
+    void connectCloudSync(syncInfo.key).catch(() => undefined);
+  }, [loaded, syncInfo.key, connectCloudSync]);
+
+  useEffect(() => {
+    stateRef.current = state;
+    if (!loaded) return;
+    saveState(state);
+    if (suppressUploadRef.current) {
+      suppressUploadRef.current = false;
+      return;
+    }
+    if (!syncReadyRef.current || !syncKeyRef.current) return;
+    if (uploadTimerRef.current !== null) window.clearTimeout(uploadTimerRef.current);
+    setSyncInfo(current => ({ ...current, status: 'syncing', error: '' }));
+    uploadTimerRef.current = window.setTimeout(() => {
+      uploadTimerRef.current = null;
+      void pushCurrentState().catch(() => undefined);
+    }, 1_000);
+  }, [state, loaded, pushCurrentState]);
+
+  useEffect(() => {
+    if (!loaded || !syncInfo.key) return;
+    let stopped = false;
+    const pullLatest = async () => {
+      if (
+        stopped || !syncReadyRef.current || uploadingRef.current || uploadTimerRef.current !== null
+        || document.visibilityState === 'hidden'
+      ) return;
+      try {
+        const remote = await fetchCloudSnapshot(syncKeyRef.current);
+        if (remote && remote.revision > revisionRef.current) {
+          applyCloudState(remote.data, remote.revision, remote.updatedAt);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无法读取云端数据';
+        setSyncInfo(current => ({ ...current, status: navigator.onLine ? 'error' : 'offline', error: message }));
+      }
+    };
+    const interval = window.setInterval(() => void pullLatest(), 20_000);
+    const onOnline = () => void pullLatest();
+    window.addEventListener('online', onOnline);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [loaded, syncInfo.key, applyCloudState]);
 
   const addOrder = useCallback((order: Omit<Order, 'id'>) => {
     const id = genId('o');
@@ -102,6 +269,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = genId('f');
     const newRecord = { ...record, id };
     setState(prev => ({ ...prev, feedingRecords: [...prev.feedingRecords, newRecord] }));
+  }, []);
+
+  const syncPlannedFeedingRecords = useCallback((date: string, planId: string, records: Omit<FeedingRecord, 'id'>[]) => {
+    setState(prev => {
+      const plannedTimes = new Set(records.map(record => record.plannedTime));
+      let changed = false;
+      const nextRecords = prev.feedingRecords.filter(record => {
+        const stale = record.date === date && record.planId === planId && !record.completed
+          && !plannedTimes.has(record.plannedTime);
+        if (stale) changed = true;
+        return !stale;
+      });
+
+      records.forEach(record => {
+        const index = nextRecords.findIndex(current =>
+          current.date === date && current.planId === planId && current.plannedTime === record.plannedTime
+        );
+        if (index === -1) {
+          nextRecords.push({ ...record, id: genId('f') });
+          changed = true;
+          return;
+        }
+
+        const current = nextRecords[index];
+        if (!current.completed && (
+          current.mealType !== record.mealType || current.foodName !== record.foodName
+          || current.amount !== record.amount || current.note !== record.note
+          || current.planStageId !== record.planStageId
+        )) {
+          nextRecords[index] = { ...current, ...record };
+          changed = true;
+        }
+      });
+
+      return changed ? { ...prev, feedingRecords: nextRecords } : prev;
+    });
   }, []);
 
   const updateFeedingRecord = useCallback((id: string, updates: Partial<FeedingRecord>) => {
@@ -207,7 +410,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, updateOrderCategory, recordOrderUsage, deleteOrder, addFeedingRecord, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState }}>
+    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, updateOrderCategory, recordOrderUsage, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
       {children}
     </AppContext.Provider>
   );

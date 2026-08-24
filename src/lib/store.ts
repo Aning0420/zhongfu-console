@@ -20,9 +20,13 @@ export interface FeedingRecord {
   mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   foodName: string;
   amount: string;
+  remainingAmount?: string;
   completed: boolean;
   note: string;
   eatingSpeed?: 'fast' | 'normal' | 'slow'; // 进食速度/喜好程度
+  plannedTime?: string;
+  planId?: string;
+  planStageId?: string;
 }
 
 // 喂食计划阶段

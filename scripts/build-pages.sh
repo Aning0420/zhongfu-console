@@ -21,6 +21,7 @@ ZHONGFU_STATIC_EXPORT=1 \
 NEXT_PUBLIC_STATIC_MODE=1 \
 NEXT_PUBLIC_BASE_PATH=/zhongfu-console \
 NEXT_PUBLIC_CHAT_API_URL=https://zhongfu-assistant-pages.pages.dev/api/chat \
+NEXT_PUBLIC_SYNC_API_URL=https://zhongfu-assistant-pages.pages.dev/api/sync \
 pnpm next build --webpack
 
 touch "$PROJECT_ROOT/out/.nojekyll"

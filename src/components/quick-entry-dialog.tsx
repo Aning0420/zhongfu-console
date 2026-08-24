@@ -27,7 +27,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
   const { state, addOrder, addFeedingRecord, addHealthRecord, updateHealthRecord, addExpense } = useAppContext();
   const today = new Date().toISOString().split('T')[0];
   const [entryType, setEntryType] = useState<EntryType>('feeding');
-  const [feeding, setFeeding] = useState({ mealType: getSuggestedMeal(), foodName: '', amount: '', eatingSpeed: 'normal' as NonNullable<FeedingRecord['eatingSpeed']>, note: '' });
+  const [feeding, setFeeding] = useState({ mealType: getSuggestedMeal(), foodName: '', amount: '', remainingAmount: '', eatingSpeed: 'normal' as NonNullable<FeedingRecord['eatingSpeed']>, note: '' });
   const [observation, setObservation] = useState<DailyObservation>({ appetite: 'normal', energy: 'normal', stool: 'normal', urine: 'normal', vomiting: 'none' });
   const [observationNote, setObservationNote] = useState('');
   const [weight, setWeight] = useState({ value: '', note: '' });
@@ -43,11 +43,12 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
       mealType: feeding.mealType,
       foodName: feeding.foodName.trim(),
       amount: feeding.amount.trim(),
+      remainingAmount: feeding.remainingAmount.trim() || undefined,
       completed: true,
       eatingSpeed: feeding.eatingSpeed,
       note: feeding.note.trim(),
     });
-    setFeeding(prev => ({ ...prev, foodName: '', amount: '', note: '' }));
+    setFeeding(prev => ({ ...prev, foodName: '', amount: '', remainingAmount: '', note: '' }));
     close();
   };
 
@@ -166,6 +167,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
               <Field label="吃了什么"><Input value={feeding.foodName} onChange={event => setFeeding(prev => ({ ...prev, foodName: event.target.value }))} placeholder="如：主粮或罐头" autoFocus /></Field>
               <Field label="用量"><Input value={feeding.amount} onChange={event => setFeeding(prev => ({ ...prev, amount: event.target.value }))} placeholder="如：45g" /></Field>
             </div>
+            <Field label="剩余量（可选）"><Input value={feeding.remainingAmount} onChange={event => setFeeding(prev => ({ ...prev, remainingAmount: event.target.value }))} placeholder="如：2g、半碗或无" /></Field>
             <Field label="备注"><Input value={feeding.note} onChange={event => setFeeding(prev => ({ ...prev, note: event.target.value }))} placeholder="可选，如饮水、食欲变化" /></Field>
             <SubmitRow onCancel={close} onSubmit={submitFeeding} label="完成打卡" />
           </TabsContent>

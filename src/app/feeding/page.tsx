@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, Trash2, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { FeedingRecord } from '@/lib/store';
+import type { FeedingPlanStage, FeedingRecord } from '@/lib/store';
 import { FeedingPlanManager } from '@/components/feeding-plan-manager';
 
 const mealIcons = {
@@ -33,8 +33,45 @@ const eatingSpeedConfig = {
   slow: { label: '挑食', icon: Snail, color: 'text-[#E88888]', bg: 'bg-[#E88888]/10', emoji: '😒' },
 };
 
+function mealTypeForTime(time: string): FeedingRecord['mealType'] {
+  const hour = Number(time.slice(0, 2));
+  if (hour < 11) return 'breakfast';
+  if (hour < 18) return 'lunch';
+  return 'dinner';
+}
+
+function stageForDate(stages: FeedingPlanStage[], date: string) {
+  return stages.find(stage => stage.startDate <= date && stage.endDate >= date);
+}
+
+function planMealAmount(food: string): string {
+  const amounts = food.match(/\d+(?:\.\d+)?\s*(?:g|克|ml|毫升)/gi);
+  return amounts?.join(' + ') || '按计划';
+}
+
+function daysBetween(startDate: string, date: string): number {
+  const start = new Date(`${startDate}T00:00:00Z`).getTime();
+  const current = new Date(`${date}T00:00:00Z`).getTime();
+  return Math.floor((current - start) / 86_400_000) + 1;
+}
+
+function mealFoodForDate(stage: FeedingPlanStage, date: string, fallback: string): string {
+  if (fallback !== '按本阶段说明执行') return fallback;
+  const stageDay = daysBetween(stage.startDate, date);
+  const rules = [...stage.description.matchAll(/第\s*(\d+)\s*(?:[～~\-至]\s*(\d+))?\s*天(?:起)?\s*[｜|]\s*([^\n]+)/g)];
+  const matchingRule = rules.find(rule => {
+    const start = Number(rule[1]);
+    const end = Number(rule[2] || rule[1]);
+    return stageDay >= start && stageDay <= end;
+  });
+  if (!matchingRule) return fallback;
+  const dailyFood = matchingRule[3].trim().replace(/^每餐/, '');
+  const fixedMilk = stage.description.match(/每餐奶液固定为\s*([^\n]+)/)?.[1]?.trim();
+  return [dailyFood, fixedMilk].filter(Boolean).join('；');
+}
+
 export default function FeedingPage() {
-  const { state, addFeedingRecord, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
+  const { state, addFeedingRecord, syncPlannedFeedingRecords, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -65,6 +102,29 @@ export default function FeedingPage() {
   }, [state.feedingRecords]);
 
   const todayRecords = recordsByDate[selectedDate] || [];
+  const activePlan = state.feedingPlans.find(plan => plan.active);
+  const activeStage = activePlan ? stageForDate(activePlan.stages, selectedDate) : undefined;
+
+  useEffect(() => {
+    if (!activePlan || !activeStage) return;
+    const plannedRecords = activeStage.mealSchedule.map(meal => {
+      const mealType = mealTypeForTime(meal.time);
+      const foodName = mealFoodForDate(activeStage, selectedDate, meal.food);
+      const note = [meal.note, activeStage.supplements].filter(Boolean).join('；');
+      return {
+        date: selectedDate,
+        mealType,
+        foodName,
+        amount: planMealAmount(`${foodName} ${meal.note}`),
+        completed: false,
+        note,
+        plannedTime: meal.time,
+        planId: activePlan.id,
+        planStageId: activeStage.id,
+      };
+    });
+    syncPlannedFeedingRecords(selectedDate, activePlan.id, plannedRecords);
+  }, [activePlan, activeStage, selectedDate, syncPlannedFeedingRecords]);
   const previousDate = useMemo(() => {
     const date = new Date(`${selectedDate}T12:00:00`);
     date.setDate(date.getDate() - 1);
@@ -163,6 +223,7 @@ export default function FeedingPage() {
               if (!day) return <div key={`pad-${i}`} />;
               const dateStr = formatDateStr(day);
               const records = recordsByDate[dateStr] || [];
+              const hasPlan = Boolean(activePlan && stageForDate(activePlan.stages, dateStr));
               const allDone = records.length > 0 && records.every(r => r.completed);
               const someDone = records.some(r => r.completed);
               const isSelected = dateStr === selectedDate;
@@ -187,14 +248,16 @@ export default function FeedingPage() {
                   )}>
                     {day.getDate()}
                   </span>
-                  {records.length > 0 && (
+                  {(records.length > 0 || hasPlan) && (
                     <div className="flex items-center gap-0.5 mt-0.5">
                       {allDone ? (
                         <span className="text-[10px] bounce-check">✅</span>
                       ) : someDone ? (
                         <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                      ) : (
+                      ) : records.length > 0 ? (
                         <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30" />
+                      ) : (
+                        <span className="w-1.5 h-1.5 rounded-full border border-primary" />
                       )}
                     </div>
                   )}
@@ -214,6 +277,9 @@ export default function FeedingPage() {
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30" /> 未完成
             </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="w-1.5 h-1.5 rounded-full border border-primary" /> 有计划
+            </div>
           </div>
         </div>
 
@@ -225,6 +291,9 @@ export default function FeedingPage() {
                 {selectedDate === new Date().toISOString().split('T')[0] ? '今日喂食记录' : `${selectedDate.slice(5).replace('-', '月')}日喂食记录`}
               </h2>
               <p className="text-xs text-muted-foreground mt-1">{selectedDate}</p>
+              {activePlan && activeStage && (
+                <p className="mt-1 text-xs text-primary-foreground">{activePlan.name} · {activeStage.name}</p>
+              )}
             </div>
             {todayRecords.length === 0 && previousDayRecords.length > 0 && (
               <Button variant="outline" size="sm" onClick={copyPreviousDay} className="h-8 shrink-0 px-2.5 text-xs">
@@ -271,20 +340,55 @@ export default function FeedingPage() {
                       )}
                     </div>
                     {mealRecords.length > 0 ? (
-                      <div className="mt-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-xs text-muted-foreground">
-                            {mealRecords[0].foodName} · {mealRecords[0].amount}
-                          </p>
-                          {mealRecords[0].eatingSpeed && (
-                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', eatingSpeedConfig[mealRecords[0].eatingSpeed].bg, eatingSpeedConfig[mealRecords[0].eatingSpeed].color)}>
-                              {eatingSpeedConfig[mealRecords[0].eatingSpeed].emoji} {eatingSpeedConfig[mealRecords[0].eatingSpeed].label}
-                            </span>
-                          )}
-                        </div>
-                        {mealRecords[0].note && (
-                          <p className="text-xs text-muted-foreground/70 mt-0.5">{mealRecords[0].note}</p>
-                        )}
+                      <div className="mt-1 space-y-2">
+                        {mealRecords.map((record, recordIndex) => (
+                          <div key={record.id} className={cn(recordIndex > 0 && 'border-t border-border/50 pt-2')}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <p className="text-xs text-muted-foreground">
+                                    {record.plannedTime ? `${record.plannedTime} · ` : ''}{record.foodName} · {record.amount}
+                                  </p>
+                                  {record.planId && !record.completed && (
+                                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary-foreground">计划</span>
+                                  )}
+                                  {record.eatingSpeed && (
+                                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', eatingSpeedConfig[record.eatingSpeed].bg, eatingSpeedConfig[record.eatingSpeed].color)}>
+                                      {eatingSpeedConfig[record.eatingSpeed].emoji} {eatingSpeedConfig[record.eatingSpeed].label}
+                                    </span>
+                                  )}
+                                </div>
+                                {record.note && (
+                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{record.note}</p>
+                                )}
+                                {record.remainingAmount && (
+                                  <p className="mt-0.5 text-xs text-muted-foreground/70">剩余：{record.remainingAmount}</p>
+                                )}
+                              </div>
+                              {recordIndex > 0 && (
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <button
+                                    onClick={() => toggleFeedingComplete(record.id)}
+                                    className={cn(
+                                      'flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all',
+                                      record.completed ? 'border-primary bg-primary text-white' : 'border-border hover:border-primary'
+                                    )}
+                                    title={record.completed ? '标记为未完成' : '标记为已完成'}
+                                  >
+                                    {record.completed && <Check className="h-3 w-3" />}
+                                  </button>
+                                  <button
+                                    onClick={() => { if (confirm('确定删除该记录？')) deleteFeedingRecord(record.id); }}
+                                    className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-destructive/30 text-destructive transition-all hover:bg-destructive/10"
+                                    title="删除"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground/50 mt-1">未记录</p>
@@ -384,6 +488,7 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
     mealType: 'breakfast' as FeedingRecord['mealType'],
     foodName: '',
     amount: '',
+    remainingAmount: '',
     note: '',
     eatingSpeed: 'normal' as FeedingRecord['eatingSpeed'],
     completed: true,
@@ -391,7 +496,13 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
 
   const handleSubmit = () => {
     if (!form.foodName || !form.amount) return;
-    onAdd(form);
+    onAdd({
+      ...form,
+      foodName: form.foodName.trim(),
+      amount: form.amount.trim(),
+      remainingAmount: form.remainingAmount.trim() || undefined,
+      note: form.note.trim(),
+    });
     onClose();
   };
 
@@ -428,6 +539,10 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
             <Label>用量</Label>
             <Input value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} placeholder="如：50g" />
           </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>剩余量（可选）</Label>
+          <Input value={form.remainingAmount} onChange={e => setForm(p => ({ ...p, remainingAmount: e.target.value }))} placeholder="如：2g、半碗或无" />
         </div>
         <div className="space-y-2">
           <Label>进食速度 / 喜好程度</Label>

@@ -13,9 +13,10 @@ interface ChatMessage {
 interface ChatRequest {
   messages?: ChatMessage[];
   image?: string;
+  context?: string;
 }
 
-const TEXT_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
+const TEXT_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
 const STRUCTURED_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8';
 const VISION_MODEL = '@cf/moondream/moondream3.1-9B-A2B';
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
@@ -35,7 +36,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 可用数据类型和字段：
 - procurement: item_name, category, quantity, unit, price, supplier
 - expense: category, amount, description, note
-- feeding: meal_type(breakfast/lunch/dinner/snack), food_name, amount, note
+- feeding: meal_type(breakfast/lunch/dinner/snack), food_name, amount, remaining_amount(可选), note
 - feeding_plan: name, active, stages；stage 包含 name,start_date,end_date,description,meals,supplements；meal 包含 time,food,note
 - weight: weight
 - daily_observation: date, appetite(great/normal/low/none), energy(active/normal/quiet/poor), stool(normal/soft/diarrhea/constipation/unseen), urine(normal/less/frequent/abnormal/unseen), vomiting(none/hairball/food/yellow/other), note
@@ -48,6 +49,9 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 - feeding_plan 的 supplements 必须是普通字符串；meal 只使用 time、food、note，其中食物、克数和冲泡方式都可合并写入 food 或 note。
 - 结构化数据必须是一个完整、紧凑、有效的 JSON 对象，不要在 JSON 中插入第二个数组或额外说明。
 - 信息足够时直接简短确认并输出同步数据；信息不足时只追问缺少的信息，不要同时输出同步数据。
+- 回答涉及“现在、今天、当前库存、当前计划、最近体重”等问题时，优先使用应用数据摘要，不要让用户重复提供已有记录。
+- 不要声称已经记录数据，除非同时输出了完整同步标记。
+- 用户提供医生制定的用药或恢复计划时应忠实保留，不擅自改变剂量或疗程；可以提示风险，但不要覆盖原计划。
 - 日期使用 YYYY-MM-DD。住院持续多天时，提取开始和结束日期。
 - 采购分类只能选择：${CATEGORIES.join('、')}。
 - 不确定主食或零食时先追问，不要只凭包装形态判断。
@@ -149,7 +153,92 @@ function formatFeedingPlanResult(result: unknown): string {
 }
 
 function isFeedingPlanEntry(text: string): boolean {
-  return /(饮食|喂食)计划/.test(text) && /(添加|记录|录入|保存|创建|编辑|修改|帮我)/.test(text);
+  return (
+    /(饮食|喂食)计划/.test(text) && /(添加|记录|录入|保存|创建|编辑|修改|帮我)/.test(text)
+  ) || (/计划名称\s*[:：]/.test(text) && /阶段\s*1\s*[:：]/.test(text));
+}
+
+function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return toIsoDate(value);
+}
+
+function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null {
+  const planName = text.match(/计划名称\s*[:：]\s*([^\n]+)/)?.[1]?.trim();
+  const stagePattern = /^\s*阶段\s*(\d+)\s*[:：]\s*([^\n]+)/gm;
+  const matches = [...text.matchAll(stagePattern)];
+  if (!planName || matches.length < 2) return null;
+
+  const fixedTimes = [...new Set(
+    [...text.slice(0, matches[0].index).matchAll(/(?:^|\n)\s*(\d{2}:\d{2})\s+(?:早餐|午餐|晚餐)/g)]
+      .map(match => match[1])
+  )];
+  const mealTimes = fixedTimes.length > 0 ? fixedTimes : ['08:00', '13:00', '22:00'];
+  const prelude = text.slice(0, matches[0].index)
+    .replace(/^\s*计划名称[^\n]*\n?/m, '')
+    .replace(/^\s*固定喂食时间[^\n]*\n?/m, '')
+    .replace(/^\s*[-*]?\s*\d{2}:\d{2}\s+(?:早餐|午餐|晚餐)\s*$/gm, '')
+    .trim();
+
+  let previousEnd = '';
+  const today = toIsoDate(new Date());
+  const stages = matches.map((match, index) => {
+    const blockStart = match.index ?? 0;
+    const blockEnd = matches[index + 1]?.index ?? text.length;
+    const block = text.slice(blockStart, blockEnd).replace(/\\\s*$/gm, '').trim();
+    const explicitDates = block.match(/\d{4}-\d{2}-\d{2}/g) || [];
+    const startDate = explicitDates[0] || (previousEnd ? addDays(previousEnd, 1) : today);
+
+    const durationEnds = [
+      ...[...block.matchAll(/第\s*(\d+)(?:\s*[～~\-至]\s*(\d+))?\s*天/g)]
+        .map(value => Number(value[2] || value[1])),
+      ...[...block.matchAll(/(?:^|[^第\d])(\d+)\s*[～~\-至]\s*(\d+)\s*天/g)]
+        .map(value => Number(value[2])),
+    ].filter(value => Number.isFinite(value) && value > 0);
+    const duration = durationEnds.length > 0 ? Math.max(...durationEnds) : 1;
+    const endDate = explicitDates[1]
+      || (index === matches.length - 1 ? '2099-12-31' : addDays(startDate, duration - 1));
+    previousEnd = endDate;
+
+    const timedMeals = [...block.matchAll(/^\s*(\d{2}:\d{2})\s*[｜|]\s*(.+)$/gm)].map(value => {
+      const parts = value[2].split(/[｜|]/).map(part => part.trim()).filter(Boolean);
+      return {
+        time: value[1],
+        food: parts[0] || '按本阶段说明执行',
+        note: parts.slice(1).join('；'),
+      };
+    });
+    const meals = timedMeals.length > 0
+      ? timedMeals
+      : mealTimes.map(time => ({ time, food: '按本阶段说明执行', note: '' }));
+    const supplementLines = block.split('\n')
+      .map(line => line.replace(/^\s*[-*]\s*/, '').trim())
+      .filter(line => !/^\d{2}:\d{2}\s*[｜|]/.test(line) && /用药|乳铁蛋白|益生菌|补充剂/.test(line));
+    const description = [index === 0 ? prelude : '', block]
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(0, 8_000);
+
+    return {
+      name: `阶段${match[1]}：${match[2].trim()}`,
+      start_date: startDate,
+      end_date: endDate,
+      description,
+      meals,
+      supplements: supplementLines.join('；').slice(0, 2_000),
+    };
+  });
+
+  return {
+    name: planName,
+    active: /设为当前计划\s*[:：]\s*是/.test(text),
+    stages,
+  };
 }
 
 function validateImage(dataUrl: string): string {
@@ -170,11 +259,17 @@ function parseSyncData(text: string): unknown | null {
   }
 }
 
-function sseResponse(text: string, origin: string) {
-  const syncData = parseSyncData(text);
-  const safeText = !syncData && text.includes('---SYNC_DATA_START---')
-    ? text.replace(/---SYNC_DATA_START---[\s\S]*$/, '').trim()
-      || '这份计划没有完整解析，请缩短内容或分阶段发送。'
+function isDataMutationRequest(text: string): boolean {
+  return /(记录|添加|录入|保存|创建|修改|更新|删除|设为当前)/.test(text);
+}
+
+function sseResponse(text: string, origin: string, allowSync = true) {
+  const parsedSyncData = parseSyncData(text);
+  const syncData = allowSync ? parsedSyncData : null;
+  const hasSyncMarker = text.includes('---SYNC_DATA_START---');
+  const safeText = hasSyncMarker
+    ? text.replace(/\s*---SYNC_DATA_START---[\s\S]*$/, '').trim()
+      || (parsedSyncData ? '已处理。' : '这份计划没有完整解析，请缩短内容或分阶段发送。')
     : text;
   const payloads = [`data: ${JSON.stringify({ text: safeText })}\n\n`];
   if (syncData) payloads.push(`data: ${JSON.stringify({ syncData })}\n\n`);
@@ -221,6 +316,10 @@ const worker = {
         content: message.content.slice(0, index === validMessages.length - 1 ? 12_000 : 3_000),
       }));
       const latest = history.at(-1)?.content || '请分析这张图片';
+      const appContext = typeof body.context === 'string' ? body.context.slice(0, 8_000) : '';
+      const contextualPrompt = appContext
+        ? `${SYSTEM_PROMPT}\n\n以下是钟福供养办事处当前应用数据摘要，仅用于回答当前问题：\n${appContext}`
+        : SYSTEM_PROMPT;
 
       let result: unknown;
       if (body.image) {
@@ -235,17 +334,22 @@ const worker = {
         const imageDescription = getText(visionResult);
         result = await env.AI.run(TEXT_MODEL, {
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: contextualPrompt },
             ...history.slice(0, -1),
             {
               role: 'user',
               content: `${latest}\n\n图片识别结果（仅作为图片内容参考）：${imageDescription}`,
             },
           ],
-          max_tokens: 2000,
+          max_tokens: 1200,
           temperature: 0.35,
         });
       } else if (isFeedingPlanEntry(latest)) {
+        const explicitPlan = parseExplicitFeedingPlan(latest);
+        if (explicitPlan) {
+          const responseText = `已按原文保存“${String(explicitPlan.name)}”，共 ${Array.isArray(explicitPlan.stages) ? explicitPlan.stages.length : 0} 个阶段。\n\n---SYNC_DATA_START---\n${JSON.stringify({ type: 'feeding_plan', data: explicitPlan })}\n---SYNC_DATA_END---`;
+          return sseResponse(responseText, origin);
+        }
         const structuredMessages = [
           {
             role: 'system',
@@ -269,13 +373,13 @@ const worker = {
         }
       } else {
         result = await env.AI.run(TEXT_MODEL, {
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history],
-          max_tokens: 2000,
+          messages: [{ role: 'system', content: contextualPrompt }, ...history],
+          max_tokens: 1200,
           temperature: 0.35,
         });
       }
 
-      return sseResponse(getText(result), origin);
+      return sseResponse(getText(result), origin, isDataMutationRequest(latest));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI 服务暂时不可用';
       return Response.json({ error: message }, { status: 500, headers: corsHeaders(origin) });

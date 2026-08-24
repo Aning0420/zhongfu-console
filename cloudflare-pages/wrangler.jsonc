@@ -6,6 +6,13 @@
   "ai": {
     "binding": "AI"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zhongfu-console-sync",
+      "database_id": "7548a83f-69f7-447a-b4ce-318813a6867a"
+    }
+  ],
   "vars": {
     "ALLOWED_ORIGIN": "https://aning0420.github.io"
   }
