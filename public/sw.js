@@ -2,14 +2,20 @@ const CACHE_VERSION = 'zhongfu-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
+const BASE_PATH = self.location.pathname.replace(/\/sw\.js$/, '');
+const withBasePath = path => `${BASE_PATH}${path}`;
 
 const APP_SHELL = [
-  '/',
-  '/offline.html',
-  '/manifest.json',
-  '/apple-touch-icon.png',
-  '/zhongfu-cat-app-icon-192.png',
-  '/zhongfu-cat-app-icon.png',
+  withBasePath('/'),
+  withBasePath('/procurement/'),
+  withBasePath('/feeding/'),
+  withBasePath('/health/'),
+  withBasePath('/expenses/'),
+  withBasePath('/offline.html'),
+  withBasePath('/manifest.json'),
+  withBasePath('/apple-touch-icon.png'),
+  withBasePath('/zhongfu-cat-app-icon-192.png'),
+  withBasePath('/zhongfu-cat-app-icon.png'),
 ];
 
 self.addEventListener('install', event => {
@@ -41,7 +47,7 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  if (url.origin !== self.location.origin || url.pathname.startsWith(`${BASE_PATH}/api/`)) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(networkFirstPage(request));
@@ -49,7 +55,7 @@ self.addEventListener('fetch', event => {
   }
 
   if (
-    url.pathname.startsWith('/_next/static/') ||
+    url.pathname.startsWith(`${BASE_PATH}/_next/static/`) ||
     request.destination === 'image' ||
     request.destination === 'font'
   ) {
@@ -68,7 +74,7 @@ async function networkFirstPage(request) {
   } catch {
     return (
       await caches.match(request, { ignoreSearch: true }) ||
-      await caches.match('/offline.html')
+      await caches.match(withBasePath('/offline.html'))
     );
   }
 }

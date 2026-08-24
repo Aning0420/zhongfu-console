@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 
 const UPDATE_INTERVAL = 60 * 60 * 1000;
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 export function PwaRegister() {
   useEffect(() => {
@@ -20,8 +21,8 @@ export function PwaRegister() {
 
     const register = async () => {
       try {
-        const registration = await navigator.serviceWorker.register('/sw.js', {
-          scope: '/',
+        const registration = await navigator.serviceWorker.register(`${BASE_PATH}/sw.js`, {
+          scope: `${BASE_PATH}/`,
           updateViaCache: 'none',
         });
         await registration.update();

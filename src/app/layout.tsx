@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import AppShell from '@/components/app-shell';
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 export const metadata: Metadata = {
   applicationName: '钟福供养办事处',
   title: '钟福供养办事处',
@@ -10,11 +12,11 @@ export const metadata: Metadata = {
     telephone: false,
   },
   icons: {
-    icon: [{ url: '/zhongfu-cat-icon.png', type: 'image/png', sizes: '512x512' }],
-    shortcut: '/zhongfu-cat-icon.png',
-    apple: [{ url: '/zhongfu-cat-app-icon.png', type: 'image/png', sizes: '512x512' }],
+    icon: [{ url: `${basePath}/zhongfu-cat-icon.png`, type: 'image/png', sizes: '512x512' }],
+    shortcut: `${basePath}/zhongfu-cat-icon.png`,
+    apple: [{ url: `${basePath}/zhongfu-cat-app-icon.png`, type: 'image/png', sizes: '512x512' }],
   },
-  manifest: '/manifest.json',
+  manifest: `${basePath}/manifest.json`,
   appleWebApp: {
     capable: true,
     title: '钟福供养办事处',
