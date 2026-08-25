@@ -8,9 +8,10 @@ export interface Order {
   /** Amount actually paid for this purchase. Older records only have unitPrice. */
   totalPrice?: number;
   purchaseDate: string;
-  status: 'pending' | 'shipped' | 'delivered' | 'finished' | 'cancelled';
+  status: 'pending' | 'shipped' | 'delivered' | 'durable' | 'finished' | 'cancelled';
   consumed: number;
   consumedBeforeFinished?: number;
+  consumedBeforeDurable?: number;
   repurchasedAt?: string;
   supplier: string;
   productionDate?: string;
@@ -219,7 +220,16 @@ export function restoreInventoryDeductions(orders: Order[], deductions?: Invento
           : deduction.amount;
         return sum + (converted ?? 0);
       }, 0);
-    return amount ? { ...order, consumed: roundInventory(Math.max(0, order.consumed - amount)) } : order;
+    if (!amount) return order;
+    if (order.status === 'finished') {
+      const previous = order.consumedBeforeFinished ?? order.consumed;
+      return { ...order, consumedBeforeFinished: roundInventory(Math.max(0, previous - amount)) };
+    }
+    if (order.status === 'durable') {
+      const previous = order.consumedBeforeDurable ?? order.consumed;
+      return { ...order, consumedBeforeDurable: roundInventory(Math.max(0, previous - amount)) };
+    }
+    return { ...order, consumed: roundInventory(Math.max(0, order.consumed - amount)) };
   });
 }
 

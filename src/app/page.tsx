@@ -130,7 +130,7 @@ export default function DashboardPage() {
         id: o.id,
         icon: ShoppingCart,
         color: 'text-accent',
-        text: `采购${o.itemName} ${o.status === 'delivered' ? '已到货' : o.status === 'shipped' ? '运输中' : o.status === 'finished' ? '已用完·不回购' : o.status === 'cancelled' ? '已取消' : '待发货'}`,
+        text: `采购${o.itemName} ${o.status === 'delivered' ? '已到货' : o.status === 'shipped' ? '运输中' : o.status === 'durable' ? '耐用品·无消耗' : o.status === 'finished' ? '已用完·不回购' : o.status === 'cancelled' ? '已取消' : '待发货'}`,
         time: o.purchaseDate,
       });
     });

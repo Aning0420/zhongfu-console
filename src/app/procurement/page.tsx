@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, getPriceHistory, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -21,6 +21,7 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
   shipped: { label: '运输中', icon: Truck, color: 'text-[#87CEEB] bg-[#87CEEB]/10' },
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
+  durable: { label: '耐用品·无消耗', icon: Archive, color: 'text-[#52796F] bg-[#52796F]/10' },
   finished: { label: '已用完·不回购', icon: PackageCheck, color: 'text-muted-foreground bg-muted' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
@@ -39,8 +40,9 @@ const statusSortOrder: Record<Order['status'], number> = {
   pending: 0,
   shipped: 1,
   delivered: 2,
-  finished: 3,
-  cancelled: 4,
+  durable: 3,
+  finished: 4,
+  cancelled: 5,
 };
 const chineseCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 
@@ -91,6 +93,7 @@ function expiryDaysLabel(daysLeft: number, compact = false) {
 }
 
 function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { daysLeft: number; depletionDate: string; dailyUsage: number } | null {
+  if (order.status !== 'delivered') return null;
   const remaining = order.quantity - order.consumed;
   if (remaining <= 0) {
     return { daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: 0 };
@@ -120,7 +123,7 @@ export default function ProcurementPage() {
 
   useEffect(() => {
     const requestedFilter = new URLSearchParams(window.location.search).get('filter');
-    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'pending', 'shipped', 'delivered', 'finished', 'cancelled'].includes(requestedFilter)) {
+    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'pending', 'shipped', 'delivered', 'durable', 'finished', 'cancelled'].includes(requestedFilter)) {
       setStatusFilter(requestedFilter);
     }
   }, []);
@@ -233,7 +236,7 @@ export default function ProcurementPage() {
 
   const summary = useMemo(() => {
     const stockValue = state.orders
-      .filter(o => o.status === 'delivered')
+      .filter(o => o.status === 'delivered' || o.status === 'durable')
       .reduce((sum, order) => sum + Math.max(0, order.quantity - order.consumed) * order.unitPrice, 0);
     const lowStock = state.orders.filter(order => {
       if (order.status !== 'delivered' || order.repurchasedAt) return false;
@@ -404,7 +407,7 @@ export default function ProcurementPage() {
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px] bg-card">
+          <SelectTrigger className="w-[156px] bg-card">
             <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
             <SelectValue placeholder="全部状态" />
           </SelectTrigger>
@@ -416,6 +419,7 @@ export default function ProcurementPage() {
             <SelectItem value="pending">待发货</SelectItem>
             <SelectItem value="shipped">运输中</SelectItem>
             <SelectItem value="delivered">已到货</SelectItem>
+            <SelectItem value="durable">耐用品·无消耗</SelectItem>
             <SelectItem value="finished">已用完·不回购</SelectItem>
             <SelectItem value="cancelled">已取消</SelectItem>
           </SelectContent>
@@ -546,7 +550,7 @@ export default function ProcurementPage() {
                     </td>
                     <td className="px-4 py-3">
                       <Select value={order.status} onValueChange={status => updateOrderStatus(order.id, status as Order['status'])}>
-                        <SelectTrigger size="sm" className={cn('w-[132px] border-0 shadow-none', st.color)} aria-label={`修改${order.itemName}的状态`}>
+                        <SelectTrigger size="sm" className={cn('w-[144px] border-0 shadow-none', st.color)} aria-label={`修改${order.itemName}的状态`}>
                           <st.icon className="h-3.5 w-3.5 shrink-0" />
                           <SelectValue />
                         </SelectTrigger>

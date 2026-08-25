@@ -264,34 +264,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
           : nextUnit !== order.unit
             ? convertInventoryAmount(order.consumedBeforeFinished, order.unit, nextUnit) ?? order.consumedBeforeFinished
             : order.consumedBeforeFinished;
+        const convertedBeforeDurable = order.consumedBeforeDurable === undefined
+          ? undefined
+          : nextUnit !== order.unit
+            ? convertInventoryAmount(order.consumedBeforeDurable, order.unit, nextUnit) ?? order.consumedBeforeDurable
+            : order.consumedBeforeDurable;
         const nextStatus = updates.status ?? order.status;
+        const activeConsumed = order.status === 'finished'
+          ? convertedBeforeFinished ?? convertedConsumed
+          : order.status === 'durable'
+            ? convertedBeforeDurable ?? convertedConsumed
+            : convertedConsumed;
         const next = {
           ...order,
           ...updates,
           quantity,
           unit: nextUnit,
-          consumed: Math.min(quantity, convertedConsumed),
+          consumed: Math.min(quantity, activeConsumed),
+          consumedBeforeFinished: undefined,
+          consumedBeforeDurable: undefined,
         };
 
         if (nextStatus === 'finished') {
           return {
             ...next,
             status: nextStatus,
-            consumedBeforeFinished: order.status === 'finished'
-              ? Math.min(quantity, convertedBeforeFinished ?? convertedConsumed)
-              : Math.min(quantity, convertedConsumed),
+            consumedBeforeFinished: Math.min(quantity, activeConsumed),
             consumed: quantity,
           };
         }
-        if (order.status === 'finished') {
+        if (nextStatus === 'durable') {
           return {
             ...next,
             status: nextStatus,
-            consumed: Math.min(quantity, convertedBeforeFinished ?? 0),
-            consumedBeforeFinished: undefined,
+            consumedBeforeDurable: Math.min(quantity, activeConsumed),
+            consumed: 0,
           };
         }
-        return { ...next, status: nextStatus, consumedBeforeFinished: undefined };
+        return { ...next, status: nextStatus };
       }),
     }));
   }, []);
@@ -301,23 +311,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...prev,
       orders: prev.orders.map(order => {
         if (order.id !== id) return order;
-        if (status === 'finished' && order.status !== 'finished') {
+        const activeConsumed = order.status === 'finished'
+          ? order.consumedBeforeFinished ?? order.consumed
+          : order.status === 'durable'
+            ? order.consumedBeforeDurable ?? order.consumed
+            : order.consumed;
+        if (status === 'finished') {
           return {
             ...order,
             status,
-            consumedBeforeFinished: order.consumed,
+            consumedBeforeFinished: Math.min(order.quantity, activeConsumed),
+            consumedBeforeDurable: undefined,
             consumed: order.quantity,
           };
         }
-        if (order.status === 'finished' && status !== 'finished') {
+        if (status === 'durable') {
           return {
             ...order,
             status,
-            consumed: Math.min(order.quantity, order.consumedBeforeFinished ?? order.consumed),
+            consumed: 0,
             consumedBeforeFinished: undefined,
+            consumedBeforeDurable: Math.min(order.quantity, activeConsumed),
           };
         }
-        return { ...order, status };
+        return {
+          ...order,
+          status,
+          consumed: Math.min(order.quantity, activeConsumed),
+          consumedBeforeFinished: undefined,
+          consumedBeforeDurable: undefined,
+        };
       }),
     }));
   }, []);
