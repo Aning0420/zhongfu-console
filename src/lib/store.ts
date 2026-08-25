@@ -11,6 +11,7 @@ export interface Order {
   status: 'pending' | 'shipped' | 'delivered' | 'finished' | 'cancelled';
   consumed: number;
   consumedBeforeFinished?: number;
+  repurchasedAt?: string;
   supplier: string;
   productionDate?: string;
   shelfLife?: number; // days

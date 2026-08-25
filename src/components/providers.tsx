@@ -24,6 +24,7 @@ interface AppContextType {
   state: AppState;
   addOrder: (order: Omit<Order, 'id'>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
+  markOrderRepurchased: (id: string, date: string) => void;
   updateOrderCategory: (id: string, category: string) => void;
   recordOrderUsage: (id: string, amount: number) => void;
   deleteOrder: (id: string) => void;
@@ -264,6 +265,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const markOrderRepurchased = useCallback((id: string, date: string) => {
+    setState(prev => ({
+      ...prev,
+      orders: prev.orders.map(order => order.id === id ? { ...order, repurchasedAt: date } : order),
+    }));
+  }, []);
+
   const recordOrderUsage = useCallback((id: string, amount: number) => {
     if (!Number.isFinite(amount) || amount <= 0) return;
 
@@ -429,7 +437,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, updateOrderCategory, recordOrderUsage, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
+    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, recordOrderUsage, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
       {children}
     </AppContext.Provider>
   );

@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { useAppContext } from '@/components/providers';
+import { Button } from '@/components/ui/button';
+import { RepurchaseDialog } from '@/components/repurchase-dialog';
 import {
   ShoppingCart,
   CalendarHeart,
@@ -20,10 +23,11 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { calcDailyUsage, conciseFeedingNote } from '@/lib/store';
+import { calcDailyUsage, conciseFeedingNote, type Order } from '@/lib/store';
 
 export default function DashboardPage() {
   const { state, toggleFeedingComplete } = useAppContext();
+  const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -36,6 +40,9 @@ export default function DashboardPage() {
     const monthExpenses = state.expenses
       .filter(e => e.date.startsWith(thisMonth))
       .reduce((sum, e) => sum + e.amount, 0);
+    const monthOrders = state.orders.filter(order => order.purchaseDate.startsWith(thisMonth)).length;
+    const monthCompletedFeedings = state.feedingRecords.filter(record => record.completed && record.date.startsWith(thisMonth)).length;
+    const monthHealthRecords = state.healthRecords.filter(record => record.date.startsWith(thisMonth)).length;
 
     const todayObserved = state.healthRecords.some(record => record.type === 'observation' && record.date === today);
     const dueReminders = state.healthRecords
@@ -57,25 +64,25 @@ export default function DashboardPage() {
 
     // Repurchase items (depletion within 7 days)
     const repurchaseItems = state.orders
-      .filter(o => o.status === 'delivered')
+      .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
         const remaining = order.quantity - order.consumed;
         const dailyUsage = order.dailyUsage && order.dailyUsage > 0
           ? order.dailyUsage
           : calcDailyUsage(order.itemName, state.feedingRecords);
         if (remaining <= 0) {
-          return { itemName: order.itemName, daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: dailyUsage || 0, remaining: 0 };
+          return { order, daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: dailyUsage || 0, remaining: 0 };
         }
         if (remaining > 0 && (!dailyUsage || dailyUsage <= 0)) return null;
         const daysLeft = Math.floor(remaining / dailyUsage);
         if (daysLeft < 0 || daysLeft > 7) return null;
         const depletionDate = new Date(new Date().getTime() + daysLeft * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        return { itemName: order.itemName, daysLeft, depletionDate, dailyUsage, remaining };
+        return { order, daysLeft, depletionDate, dailyUsage, remaining };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
-    return { completedFeedings, totalFeedings, monthExpenses, expiringItems, repurchaseItems, todayObserved, dueReminders };
+    return { completedFeedings, totalFeedings, monthExpenses, monthOrders, monthCompletedFeedings, monthHealthRecords, expiringItems, repurchaseItems, todayObserved, dueReminders };
   }, [state]);
 
   const todayCare = useMemo(() => {
@@ -209,13 +216,13 @@ export default function DashboardPage() {
                 <p className="text-sm font-medium text-foreground">今天还没有喂食记录</p>
                 <p className="text-xs text-muted-foreground mt-1">使用左侧“记录”可直接完成一次喂食打卡</p>
               </div>
-              <a href="/feeding" className="text-xs font-medium text-primary-foreground hover:underline shrink-0">查看日历</a>
+              <Link href="/feeding" className="text-xs font-medium text-primary-foreground hover:underline shrink-0">查看日历</Link>
             </div>
           )}
 
-          <a href="/feeding" className="inline-flex items-center gap-1 text-xs font-medium text-primary-foreground mt-4 hover:underline">
+          <Link href="/feeding" className="inline-flex items-center gap-1 text-xs font-medium text-primary-foreground mt-4 hover:underline">
             管理今天的喂食 <ArrowRight className="w-3 h-3" />
-          </a>
+          </Link>
         </section>
 
         <section className="card-warm p-5">
@@ -226,14 +233,14 @@ export default function DashboardPage() {
               label="需要补货"
               value={stats.repurchaseItems.length ? `${stats.repurchaseItems.length} 项` : '暂无'}
               tone={stats.repurchaseItems.length ? 'text-[#D4915E]' : 'text-primary-foreground'}
-              href="/procurement"
+              href="/procurement?filter=low-stock"
             />
             <AttentionRow
               icon={Timer}
               label="7 天内到期"
               value={stats.expiringItems.length ? `${stats.expiringItems.length} 项` : '暂无'}
               tone={stats.expiringItems.length ? 'text-destructive' : 'text-primary-foreground'}
-              href="/procurement"
+              href="/procurement?filter=expiring"
             />
             <AttentionRow
               icon={Scale}
@@ -260,42 +267,44 @@ export default function DashboardPage() {
         </section>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={CalendarHeart}
-          label="今日喂食"
-          value={`${stats.completedFeedings}/${stats.totalFeedings}`}
-          sub={stats.totalFeedings === 0 ? '尚未记录' : stats.completedFeedings === stats.totalFeedings ? '已全部完成' : '待完成'}
-          color={stats.totalFeedings > 0 && stats.completedFeedings === stats.totalFeedings ? 'text-primary-foreground' : 'text-accent'}
-          bgColor={stats.totalFeedings > 0 && stats.completedFeedings === stats.totalFeedings ? 'bg-primary/8' : 'bg-accent/8'}
-        />
+      {/* Monthly overview */}
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold text-foreground">本月概况</h2>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           icon={Wallet}
           label="本月支出"
           value={`¥${stats.monthExpenses.toLocaleString()}`}
-          sub="较上月"
-          trend="down"
+          sub="全部分类"
           color="text-[#87CEEB]"
           bgColor="bg-[#87CEEB]/8"
         />
         <StatCard
-          icon={RefreshCw}
-          label="回购提醒"
-          value={String(stats.repurchaseItems.length)}
-          sub="项即将耗尽"
+          icon={ShoppingCart}
+          label="本月采购"
+          value={String(stats.monthOrders)}
+          sub="个采购批次"
           color="text-[#D4915E]"
           bgColor="bg-[#D4915E]/8"
         />
         <StatCard
-          icon={Timer}
-          label="到期提醒"
-          value={String(stats.expiringItems.length)}
-          sub="项即将过期"
-          color="text-[#E88888]"
-          bgColor="bg-[#E88888]/8"
+          icon={Utensils}
+          label="本月完成喂食"
+          value={String(stats.monthCompletedFeedings)}
+          sub="次喂食记录"
+          color="text-primary"
+          bgColor="bg-primary/8"
         />
-      </div>
+        <StatCard
+          icon={HeartPulse}
+          label="本月健康记录"
+          value={String(stats.monthHealthRecords)}
+          sub="条健康记录"
+          color="text-destructive"
+          bgColor="bg-destructive/8"
+        />
+        </div>
+      </section>
 
       {/* Repurchase Reminder */}
       {stats.repurchaseItems.length > 0 && (
@@ -307,11 +316,11 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-2">
             {stats.repurchaseItems.map(item => (
-              <div key={item.itemName} className="flex items-center justify-between py-1.5 px-3 bg-white/60 rounded-lg">
-                <span className="text-sm font-medium text-foreground">{item.itemName}</span>
-                <div className="flex items-center gap-2">
+              <div key={item.order.id} className="flex flex-col gap-2 py-2 px-3 bg-white/60 rounded-lg sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-sm font-medium text-foreground">{item.order.itemName}</span>
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-muted-foreground">
-                    剩余 {item.remaining} · 日均 {item.dailyUsage.toFixed(1)}
+                    剩余 {item.remaining}{item.order.unit} · 日均 {item.dailyUsage.toFixed(1)}{item.order.unit}
                   </span>
                   <span className={cn(
                     'text-xs font-medium px-2 py-0.5 rounded-full',
@@ -321,11 +330,22 @@ export default function DashboardPage() {
                   )}>
                     {item.daysLeft === 0 ? '今天耗尽' : `${item.daysLeft}天后耗尽`}
                   </span>
+                  <Button variant="outline" size="sm" onClick={() => setRepurchaseOrder(item.order)} className="h-7 text-xs">
+                    <ShoppingCart className="h-3.5 w-3.5" />已回购
+                  </Button>
                 </div>
               </div>
             ))}
           </div>
         </div>
+      )}
+      {repurchaseOrder && (
+        <RepurchaseDialog
+          key={repurchaseOrder.id}
+          order={repurchaseOrder}
+          open
+          onOpenChange={open => { if (!open) setRepurchaseOrder(null); }}
+        />
       )}
 
       {/* Expiry Reminder */}
@@ -436,7 +456,7 @@ function QuickAction({
   bg: string;
 }) {
   return (
-    <a
+    <Link
       href={href}
       className={cn(
         'flex items-center gap-2 p-3 rounded-xl border transition-all duration-200',
@@ -448,20 +468,20 @@ function QuickAction({
         <Icon className={cn('w-4 h-4', color)} />
       </div>
       <span className="text-sm font-medium text-foreground">{label}</span>
-    </a>
+    </Link>
   );
 }
 
 function AttentionRow({ icon: Icon, label, value, tone, href }: { icon: React.ElementType; label: string; value: string; tone: string; href: string }) {
   return (
-    <a href={href} className="flex items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/40 transition-colors">
+    <Link href={href} className="flex items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/40 transition-colors">
       <div className="w-8 h-8 rounded-lg bg-muted/60 flex items-center justify-center shrink-0">
         <Icon className={cn('w-4 h-4', tone)} />
       </div>
       <span className="text-sm text-muted-foreground flex-1">{label}</span>
       <span className={cn('text-sm font-semibold', tone)}>{value}</span>
       <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
-    </a>
+    </Link>
   );
 }
 

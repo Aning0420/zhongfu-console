@@ -11,10 +11,11 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, getPriceHistory, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, Package, PackageMinus, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageMinus, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
+import { RepurchaseDialog } from '@/components/repurchase-dialog';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -114,6 +115,14 @@ export default function ProcurementPage() {
   const [sortReady, setSortReady] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [usageOrder, setUsageOrder] = useState<Order | null>(null);
+  const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    const requestedFilter = new URLSearchParams(window.location.search).get('filter');
+    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'pending', 'shipped', 'delivered', 'finished', 'cancelled'].includes(requestedFilter)) {
+      setStatusFilter(requestedFilter);
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -149,7 +158,7 @@ export default function ProcurementPage() {
         const expiry = getExpiryInfo(o);
         const depletion = getDepletionInfo(o, state.feedingRecords);
         const stockRatio = o.quantity > 0 ? (o.quantity - o.consumed) / o.quantity : 0;
-        if (statusFilter === 'low-stock' && !(o.status === 'delivered' && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
+        if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
         if (statusFilter === 'expiring' && !(o.status === 'delivered' && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
         if (statusFilter === 'expired' && !(o.status === 'delivered' && expiry && expiry.daysLeft < 0)) return false;
         if (!['all', 'low-stock', 'expiring', 'expired'].includes(statusFilter) && o.status !== statusFilter) return false;
@@ -185,7 +194,7 @@ export default function ProcurementPage() {
   // Items needing repurchase within 7 days (based on consumption speed)
   const repurchaseItems = useMemo(() => {
     return state.orders
-      .filter(o => o.status === 'delivered')
+      .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
         const info = getDepletionInfo(order, state.feedingRecords);
         if (!info) return null;
@@ -226,7 +235,7 @@ export default function ProcurementPage() {
       .filter(o => o.status === 'delivered')
       .reduce((sum, order) => sum + Math.max(0, order.quantity - order.consumed) * order.unitPrice, 0);
     const lowStock = state.orders.filter(order => {
-      if (order.status !== 'delivered') return false;
+      if (order.status !== 'delivered' || order.repurchasedAt) return false;
       const ratio = order.quantity > 0 ? (order.quantity - order.consumed) / order.quantity : 0;
       const depletion = getDepletionInfo(order, state.feedingRecords);
       return ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7);
@@ -290,8 +299,8 @@ export default function ProcurementPage() {
           </div>
           <div className="space-y-2">
             {repurchaseItems.map(({ order, daysLeft, depletionDate, dailyUsage }) => (
-              <div key={order.id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-accent/5">
-                <div className="flex items-center gap-2">
+              <div key={order.id} className="flex flex-col gap-2 py-2 px-3 rounded-lg bg-accent/5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">{order.itemName}</span>
                   <span className="text-xs text-muted-foreground">剩余 {order.quantity - order.consumed}{order.unit}</span>
@@ -302,6 +311,9 @@ export default function ProcurementPage() {
                   <Badge className={cn('text-xs', daysLeft <= 3 ? 'bg-accent text-white' : 'bg-accent/20 text-accent')}>
                     {daysLeft === 0 ? '今天耗尽' : `还剩 ${daysLeft} 天`}
                   </Badge>
+                  <Button variant="outline" size="sm" onClick={() => setRepurchaseOrder(order)} className="h-7 text-xs">
+                    <ShoppingCart className="h-3.5 w-3.5" />已回购
+                  </Button>
                 </div>
               </div>
             ))}
@@ -600,6 +612,14 @@ export default function ProcurementPage() {
             recordOrderUsage(usageOrder.id, amount);
             setUsageOrder(null);
           }}
+        />
+      )}
+      {repurchaseOrder && (
+        <RepurchaseDialog
+          key={repurchaseOrder.id}
+          order={repurchaseOrder}
+          open
+          onOpenChange={open => { if (!open) setRepurchaseOrder(null); }}
         />
       )}
     </div>
