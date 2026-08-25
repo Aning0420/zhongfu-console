@@ -1,3 +1,5 @@
+import { localDateKey } from '@/lib/local-date';
+
 export interface Order {
   id: string;
   itemName: string;
@@ -390,7 +392,7 @@ const defaultOrders: Order[] = [
 ];
 
 const today = new Date();
-const formatDate = (d: Date) => d.toISOString().split('T')[0];
+const formatDate = (d: Date) => localDateKey(d);
 const addDays = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
 
 const defaultFeedingRecords: FeedingRecord[] = [

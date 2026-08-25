@@ -10,8 +10,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, Trash2, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { conciseFeedingNote, type FeedingPlanStage, type FeedingRecord } from '@/lib/store';
+import { conciseFeedingNote, type FeedingRecord } from '@/lib/store';
 import { FeedingPlanManager } from '@/components/feeding-plan-manager';
+import { CompleteFeedingDialog } from '@/components/complete-feeding-dialog';
+import { plannedFeedingRecordsForDate, stageForDate } from '@/lib/feeding-plan';
+import { addLocalDays, localDateKey } from '@/lib/local-date';
 
 const mealIcons = {
   breakfast: Coffee,
@@ -24,7 +27,7 @@ const mealLabels = {
   breakfast: '早餐',
   lunch: '午餐',
   dinner: '晚餐',
-  snack: '零食',
+  snack: '加餐',
 };
 
 const eatingSpeedConfig = {
@@ -33,49 +36,13 @@ const eatingSpeedConfig = {
   slow: { label: '挑食', icon: Snail, color: 'text-[#E88888]', bg: 'bg-[#E88888]/10', emoji: '😒' },
 };
 
-function mealTypeForTime(time: string): FeedingRecord['mealType'] {
-  const hour = Number(time.slice(0, 2));
-  if (hour < 11) return 'breakfast';
-  if (hour < 18) return 'lunch';
-  return 'dinner';
-}
-
-function stageForDate(stages: FeedingPlanStage[], date: string) {
-  return stages.find(stage => stage.startDate <= date && stage.endDate >= date);
-}
-
-function planMealAmount(food: string): string {
-  const amounts = food.match(/\d+(?:\.\d+)?\s*(?:g|克|ml|毫升)/gi);
-  return amounts?.join(' + ') || '按计划';
-}
-
-function daysBetween(startDate: string, date: string): number {
-  const start = new Date(`${startDate}T00:00:00Z`).getTime();
-  const current = new Date(`${date}T00:00:00Z`).getTime();
-  return Math.floor((current - start) / 86_400_000) + 1;
-}
-
-function mealFoodForDate(stage: FeedingPlanStage, date: string, fallback: string): string {
-  if (fallback !== '按本阶段说明执行') return fallback;
-  const stageDay = daysBetween(stage.startDate, date);
-  const rules = [...stage.description.matchAll(/第\s*(\d+)\s*(?:[～~\-至]\s*(\d+))?\s*天(?:起)?\s*[｜|]\s*([^\n]+)/g)];
-  const matchingRule = rules.find(rule => {
-    const start = Number(rule[1]);
-    const end = Number(rule[2] || rule[1]);
-    return stageDay >= start && stageDay <= end;
-  });
-  if (!matchingRule) return fallback;
-  const dailyFood = matchingRule[3].trim().replace(/^每餐/, '');
-  const fixedMilk = stage.description.match(/每餐奶液固定为\s*([^\n]+)/)?.[1]?.trim();
-  return [dailyFood, fixedMilk].filter(Boolean).join('；');
-}
-
 export default function FeedingPage() {
-  const { state, addFeedingRecord, syncPlannedFeedingRecords, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
+  const { state, today, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(today);
   const [view, setView] = useState<'records' | 'plans'>('records');
+  const [completingRecord, setCompletingRecord] = useState<FeedingRecord | null>(null);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -106,32 +73,12 @@ export default function FeedingPage() {
   const activeStage = activePlan ? stageForDate(activePlan.stages, selectedDate) : undefined;
 
   useEffect(() => {
-    if (!activePlan || !activeStage) return;
-    const plannedRecords = activeStage.mealSchedule.map(meal => {
-      const mealType = mealTypeForTime(meal.time);
-      const foodName = mealFoodForDate(activeStage, selectedDate, meal.food);
-      const note = meal.note.trim();
-      return {
-        date: selectedDate,
-        mealType,
-        foodName,
-        // Only consumables belong in the amount field. Preparation water stays
-        // in the note and must not be treated as stock consumption.
-        amount: planMealAmount(foodName),
-        completed: false,
-        note,
-        plannedTime: meal.time,
-        planId: activePlan.id,
-        planStageId: activeStage.id,
-      };
-    });
+    if (!activePlan) return;
+    const plannedRecords = plannedFeedingRecordsForDate(activePlan, selectedDate);
+    if (plannedRecords.length === 0) return;
     syncPlannedFeedingRecords(selectedDate, activePlan.id, plannedRecords);
-  }, [activePlan, activeStage, selectedDate, syncPlannedFeedingRecords]);
-  const previousDate = useMemo(() => {
-    const date = new Date(`${selectedDate}T12:00:00`);
-    date.setDate(date.getDate() - 1);
-    return date.toISOString().split('T')[0];
-  }, [selectedDate]);
+  }, [activePlan, selectedDate, syncPlannedFeedingRecords]);
+  const previousDate = useMemo(() => addLocalDays(selectedDate, -1), [selectedDate]);
   const previousDayRecords = recordsByDate[previousDate] || [];
 
   const copyPreviousDay = () => {
@@ -153,10 +100,20 @@ export default function FeedingPage() {
   const goToday = () => {
     const now = new Date();
     setCurrentDate(now);
-    setSelectedDate(now.toISOString().split('T')[0]);
+    setSelectedDate(today);
   };
 
-  const formatDateStr = (d: Date) => d.toISOString().split('T')[0];
+  const formatDateStr = (d: Date) => localDateKey(d);
+
+  useEffect(() => {
+    setCurrentDate(new Date());
+    setSelectedDate(today);
+  }, [today]);
+
+  const handleCompletionClick = (record: FeedingRecord) => {
+    if (record.completed) toggleFeedingComplete(record.id);
+    else setCompletingRecord(record);
+  };
 
   return (
     <div className="space-y-6 fade-in">
@@ -229,7 +186,7 @@ export default function FeedingPage() {
               const allDone = records.length > 0 && records.every(r => r.completed);
               const someDone = records.some(r => r.completed);
               const isSelected = dateStr === selectedDate;
-              const isToday = dateStr === new Date().toISOString().split('T')[0];
+              const isToday = dateStr === today;
 
               return (
                 <div
@@ -290,7 +247,7 @@ export default function FeedingPage() {
           <div className="mb-4 flex items-start justify-between gap-2">
             <div>
               <h2 className="text-base font-semibold text-foreground">
-                {selectedDate === new Date().toISOString().split('T')[0] ? '今日喂食记录' : `${selectedDate.slice(5).replace('-', '月')}日喂食记录`}
+                {selectedDate === today ? '今日喂食记录' : `${selectedDate.slice(5).replace('-', '月')}日喂食记录`}
               </h2>
               <p className="text-xs text-muted-foreground mt-1">{selectedDate}</p>
               {activePlan && activeStage && (
@@ -321,7 +278,7 @@ export default function FeedingPage() {
                       {mealRecords.length > 0 && (
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => toggleFeedingComplete(mealRecords[0].id)}
+                            onClick={() => handleCompletionClick(mealRecords[0])}
                             className={cn(
                               'w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
                               mealRecords[0].completed
@@ -370,7 +327,7 @@ export default function FeedingPage() {
                               {recordIndex > 0 && (
                                 <div className="flex shrink-0 items-center gap-2">
                                   <button
-                                    onClick={() => toggleFeedingComplete(record.id)}
+                                    onClick={() => handleCompletionClick(record)}
                                     className={cn(
                                       'flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all',
                                       record.completed ? 'border-primary bg-primary text-white' : 'border-border hover:border-primary'
@@ -480,6 +437,17 @@ export default function FeedingPage() {
           </div>
         </div>
       </div> : <FeedingPlanManager />}
+      {completingRecord && (
+        <CompleteFeedingDialog
+          key={completingRecord.id}
+          record={completingRecord}
+          onClose={() => setCompletingRecord(null)}
+          onComplete={updates => {
+            updateFeedingRecord(completingRecord.id, updates);
+            setCompletingRecord(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -527,7 +495,7 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
                 <SelectItem value="breakfast">早餐</SelectItem>
                 <SelectItem value="lunch">午餐</SelectItem>
                 <SelectItem value="dinner">晚餐</SelectItem>
-                <SelectItem value="snack">零食</SelectItem>
+                <SelectItem value="snack">加餐</SelectItem>
               </SelectContent>
             </Select>
           </div>

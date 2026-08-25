@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import type { HealthRecord, Expense } from '@/lib/store';
 import { HealthObservationPanel } from '@/components/health-observation-panel';
 import { CareReminderPanel } from '@/components/care-reminder-panel';
+import { localDateKey } from '@/lib/local-date';
 
 function inclusiveDays(startDate: string, endDate?: string) {
   if (!endDate) return 1;
@@ -29,7 +30,7 @@ function durationLabel(record: HealthRecord) {
 }
 
 export default function HealthPage() {
-  const { state, addHealthRecord, deleteHealthRecord, addExpense } = useAppContext();
+  const { state, today, addHealthRecord, deleteHealthRecord, addExpense } = useAppContext();
   const [showAdd, setShowAdd] = useState(false);
   const [activeTab, setActiveTab] = useState('observations');
 
@@ -65,7 +66,6 @@ export default function HealthPage() {
     [state.healthRecords]
   );
 
-  const today = new Date().toISOString().split('T')[0];
   const todayObserved = observationRecords.some(record => record.date === today);
   const dueReminders = reminderRecords.filter(record => !record.reminder?.completed && record.date <= today).length;
 
@@ -347,7 +347,7 @@ function EmptyState({ text }: { text: string }) {
 
 function AddHealthDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (record: Omit<HealthRecord, 'id'>) => void; addExpense?: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: localDateKey(),
     endDate: '',
     type: 'visit' as HealthRecord['type'],
     title: '',

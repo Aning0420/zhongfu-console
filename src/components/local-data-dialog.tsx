@@ -5,6 +5,7 @@ import { Cloud, Copy, Database, Download, FileUp, Link2, Link2Off, RefreshCw, X 
 import { createBackup, parseBackup } from '@/lib/store';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
+import { localDateKey } from '@/lib/local-date';
 
 interface LocalDataDialogProps {
   open: boolean;
@@ -12,7 +13,7 @@ interface LocalDataDialogProps {
 }
 
 function backupFilename() {
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localDateKey();
   return `钟福供养办事处-数据备份-${date}.json`;
 }
 

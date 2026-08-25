@@ -6,6 +6,7 @@ import { X, Send, ImagePlus, Trash2, Sparkles } from 'lucide-react';
 import { useAppContext } from './providers';
 import { cn } from '@/lib/utils';
 import type { AppState, CareReminder, DailyObservation } from '@/lib/store';
+import { localDateKey } from '@/lib/local-date';
 
 interface DisplayMessage {
   id: string;
@@ -103,7 +104,7 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], fall
 }
 
 function buildAssistantContext(state: AppState): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey();
   const month = today.slice(0, 7);
   const latestWeight = state.healthRecords
     .filter(record => record.type === 'weight' && typeof record.weight === 'number')
@@ -203,7 +204,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
   // Sync data to app modules
   const syncData = useCallback((syncData: { type: string; data: Record<string, unknown> }) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateKey();
 
     switch (syncData.type) {
       case 'procurement': {

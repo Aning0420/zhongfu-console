@@ -30,10 +30,9 @@ function observationLabel(field: typeof observationFields[number], value: string
 }
 
 export function HealthObservationPanel({ records }: { records: HealthRecord[] }) {
-  const { addHealthRecord, updateHealthRecord, deleteHealthRecord } = useAppContext();
+  const { today, addHealthRecord, updateHealthRecord, deleteHealthRecord } = useAppContext();
   const [open, setOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HealthRecord | undefined>();
-  const today = new Date().toISOString().split('T')[0];
   const todayRecord = records.find(record => record.date === today);
 
   return (
@@ -132,7 +131,8 @@ function ObservationDialog({ open, initialRecord, onClose, onSave }: {
   onClose: () => void;
   onSave: (date: string, observation: DailyObservation, detail: string) => void;
 }) {
-  const [date, setDate] = useState(initialRecord?.date || new Date().toISOString().split('T')[0]);
+  const { today } = useAppContext();
+  const [date, setDate] = useState(initialRecord?.date || today);
   const [detail, setDetail] = useState(initialRecord?.detail || '');
   const [observation, setObservation] = useState<DailyObservation>(initialRecord?.observation || {
     appetite: 'normal', energy: 'normal', stool: 'normal', urine: 'normal', vomiting: 'none',

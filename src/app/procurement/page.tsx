@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
+import { addLocalDays, localDateKey } from '@/lib/local-date';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -81,9 +82,9 @@ function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } |
   if (!order.productionDate || !order.shelfLife) return null;
   const prod = new Date(`${order.productionDate}T00:00:00Z`);
   const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateKey();
   const daysLeft = Math.round((expiry.getTime() - new Date(`${today}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1000));
-  return { daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
+  return { daysLeft, expiryDate: localDateKey(expiry) };
 }
 
 function expiryDaysLabel(daysLeft: number, compact = false) {
@@ -96,16 +97,14 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
   if (order.status !== 'delivered') return null;
   const remaining = order.quantity - order.consumed;
   if (remaining <= 0) {
-    return { daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: 0 };
+    return { daysLeft: 0, depletionDate: localDateKey(), dailyUsage: 0 };
   }
   const dailyUsage = order.dailyUsage && order.dailyUsage > 0
     ? order.dailyUsage
     : calcDailyUsage(order.itemName, feedingRecords);
   if (dailyUsage <= 0) return null;
   const daysLeft = Math.floor(remaining / dailyUsage);
-  const depletion = new Date();
-  depletion.setDate(depletion.getDate() + daysLeft);
-  return { daysLeft, depletionDate: depletion.toISOString().split('T')[0], dailyUsage };
+  return { daysLeft, depletionDate: addLocalDays(localDateKey(), daysLeft), dailyUsage };
 }
 
 export default function ProcurementPage() {
@@ -861,7 +860,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [form, setForm] = useState({
     itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', syncExpense: true,
-    purchaseDate: new Date().toISOString().split('T')[0],
+    purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
     { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '' },
@@ -963,7 +962,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     });
     if (form.syncExpense && totalPrice > 0) {
       addExpense({
-        date: form.purchaseDate || new Date().toISOString().split('T')[0],
+        date: form.purchaseDate || localDateKey(),
         category: form.category,
         amount: totalPrice,
         description: `采购${form.itemName}`,

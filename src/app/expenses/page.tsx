@@ -11,6 +11,7 @@ import { Wallet, Plus, TrendingUp, TrendingDown, PieChart as PieChartIcon, Trash
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
 import type { Expense } from '@/lib/store';
+import { localDateKey } from '@/lib/local-date';
 
 const categoryColors: Record<string, string> = {
   '主粮': '#87CEEB',
@@ -310,7 +311,7 @@ function ExpenseDialog({ initialExpense, onClose, onSave, onSaveMany }: {
 }) {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [form, setForm] = useState({
-    date: initialExpense?.date || new Date().toISOString().split('T')[0],
+    date: initialExpense?.date || localDateKey(),
     category: initialExpense?.category || '主粮',
     amount: initialExpense ? String(initialExpense.amount) : '',
     description: initialExpense?.description || '',

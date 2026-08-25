@@ -11,11 +11,12 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import type { FeedingPlan, FeedingPlanStage } from '@/lib/store';
+import { localDateKey } from '@/lib/local-date';
 
 function dateAfter(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
+  return localDateKey(date);
 }
 
 function createStage(index = 0): FeedingPlanStage {

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getPriceHistory, type Order } from '@/lib/store';
+import { localDateKey } from '@/lib/local-date';
 
 export function RepurchaseDialog({ order, open, onOpenChange }: {
   order: Order;
@@ -21,7 +22,7 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
     unit: order.unit,
     totalPrice: '',
     supplier: order.supplier,
-    purchaseDate: new Date().toISOString().split('T')[0],
+    purchaseDate: localDateKey(),
     status: 'pending' as 'pending' | 'delivered',
     syncExpense: true,
   });

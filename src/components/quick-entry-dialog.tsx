@@ -24,8 +24,7 @@ function getSuggestedMeal(): FeedingRecord['mealType'] {
 }
 
 export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { state, addOrder, addFeedingRecord, addHealthRecord, updateHealthRecord, addExpense } = useAppContext();
-  const today = new Date().toISOString().split('T')[0];
+  const { state, today, addOrder, addFeedingRecord, addHealthRecord, updateHealthRecord, addExpense } = useAppContext();
   const [entryType, setEntryType] = useState<EntryType>('feeding');
   const [feeding, setFeeding] = useState({ mealType: getSuggestedMeal(), foodName: '', amount: '', remainingAmount: '', eatingSpeed: 'normal' as NonNullable<FeedingRecord['eatingSpeed']>, note: '' });
   const [observation, setObservation] = useState<DailyObservation>({ appetite: 'normal', energy: 'normal', stool: 'normal', urine: 'normal', vomiting: 'none' });
@@ -152,7 +151,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
                     <SelectItem value="breakfast">早餐</SelectItem>
                     <SelectItem value="lunch">午餐</SelectItem>
                     <SelectItem value="dinner">晚餐</SelectItem>
-                    <SelectItem value="snack">零食</SelectItem>
+                    <SelectItem value="snack">加餐</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>

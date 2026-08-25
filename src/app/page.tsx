@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
+import { CompleteFeedingDialog } from '@/components/complete-feeding-dialog';
 import {
   ShoppingCart,
   CalendarHeart,
@@ -23,14 +24,15 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { calcDailyUsage, conciseFeedingNote, type Order } from '@/lib/store';
+import { calcDailyUsage, conciseFeedingNote, type FeedingRecord, type Order } from '@/lib/store';
+import { addLocalDays, localDateKey } from '@/lib/local-date';
 
 export default function DashboardPage() {
-  const { state, toggleFeedingComplete } = useAppContext();
+  const { state, today, updateFeedingRecord, toggleFeedingComplete } = useAppContext();
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
+  const [completingRecord, setCompletingRecord] = useState<FeedingRecord | null>(null);
 
   const stats = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
     const thisMonth = today.slice(0, 7);
 
     const todayFeedings = state.feedingRecords.filter(r => r.date === today);
@@ -57,7 +59,7 @@ export default function DashboardPage() {
         const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
         const daysLeft = Math.round((expiry.getTime() - new Date(`${today}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1000));
         if (daysLeft > 7) return null;
-        return { itemName: order.itemName, daysLeft, expiryDate: expiry.toISOString().split('T')[0] };
+        return { itemName: order.itemName, daysLeft, expiryDate: localDateKey(expiry) };
       })
       .filter((item): item is { itemName: string; daysLeft: number; expiryDate: string } => item !== null)
       .sort((a, b) => a.daysLeft - b.daysLeft);
@@ -71,27 +73,26 @@ export default function DashboardPage() {
           ? order.dailyUsage
           : calcDailyUsage(order.itemName, state.feedingRecords);
         if (remaining <= 0) {
-          return { order, daysLeft: 0, depletionDate: new Date().toISOString().split('T')[0], dailyUsage: dailyUsage || 0, remaining: 0 };
+          return { order, daysLeft: 0, depletionDate: today, dailyUsage: dailyUsage || 0, remaining: 0 };
         }
         if (remaining > 0 && (!dailyUsage || dailyUsage <= 0)) return null;
         const daysLeft = Math.floor(remaining / dailyUsage);
         if (daysLeft < 0 || daysLeft > 7) return null;
-        const depletionDate = new Date(new Date().getTime() + daysLeft * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const depletionDate = addLocalDays(today, daysLeft);
         return { order, daysLeft, depletionDate, dailyUsage, remaining };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
     return { completedFeedings, totalFeedings, monthExpenses, monthOrders, monthCompletedFeedings, monthHealthRecords, expiringItems, repurchaseItems, todayObserved, dueReminders };
-  }, [state]);
+  }, [state, today]);
 
   const todayCare = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
     const mealOrder = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
     return state.feedingRecords
       .filter(record => record.date === today)
       .sort((a, b) => mealOrder[a.mealType] - mealOrder[b.mealType]);
-  }, [state.feedingRecords]);
+  }, [state.feedingRecords, today]);
 
   const latestWeight = useMemo(() => {
     return state.healthRecords
@@ -110,7 +111,7 @@ export default function DashboardPage() {
           id: r.id,
           icon: CheckCircle2,
           color: 'text-primary',
-          text: `完成${r.mealType === 'breakfast' ? '早餐' : r.mealType === 'lunch' ? '午餐' : r.mealType === 'dinner' ? '晚餐' : '零食'}喂食：${r.foodName}`,
+          text: `完成${r.mealType === 'breakfast' ? '早餐' : r.mealType === 'lunch' ? '午餐' : r.mealType === 'dinner' ? '晚餐' : '加餐'}喂食：${r.foodName}`,
           time: r.date,
         });
       });
@@ -181,7 +182,7 @@ export default function DashboardPage() {
                 <div key={record.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                   <button
                     type="button"
-                    onClick={() => toggleFeedingComplete(record.id)}
+                    onClick={() => record.completed ? toggleFeedingComplete(record.id) : setCompletingRecord(record)}
                     className={cn(
                       'w-7 h-7 rounded-full border flex items-center justify-center transition-colors shrink-0',
                       record.completed
@@ -194,7 +195,7 @@ export default function DashboardPage() {
                   </button>
                   <div className="min-w-0 flex-1">
                     <p className={cn('text-sm font-medium', record.completed ? 'text-muted-foreground line-through' : 'text-foreground')}>
-                      {record.mealType === 'breakfast' ? '早餐' : record.mealType === 'lunch' ? '午餐' : record.mealType === 'dinner' ? '晚餐' : '零食'} · {record.foodName}
+                      {record.mealType === 'breakfast' ? '早餐' : record.mealType === 'lunch' ? '午餐' : record.mealType === 'dinner' ? '晚餐' : '加餐'} · {record.foodName}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {record.planId && record.plannedTime ? record.plannedTime : record.amount}
@@ -345,6 +346,17 @@ export default function DashboardPage() {
           order={repurchaseOrder}
           open
           onOpenChange={open => { if (!open) setRepurchaseOrder(null); }}
+        />
+      )}
+      {completingRecord && (
+        <CompleteFeedingDialog
+          key={completingRecord.id}
+          record={completingRecord}
+          onClose={() => setCompletingRecord(null)}
+          onComplete={updates => {
+            updateFeedingRecord(completingRecord.id, updates);
+            setCompletingRecord(null);
+          }}
         />
       )}
 

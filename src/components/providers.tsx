@@ -16,6 +16,8 @@ import {
   type Expense,
   type ChatMessage,
 } from '@/lib/store';
+import { plannedFeedingRecordsForDate } from '@/lib/feeding-plan';
+import { localDateKey, millisecondsUntilNextLocalDay } from '@/lib/local-date';
 import {
   clearStoredSyncKey,
   cloudSyncAvailable,
@@ -36,6 +38,7 @@ export interface SyncInfo {
 
 interface AppContextType {
   state: AppState;
+  today: string;
   addOrder: (order: Omit<Order, 'id'>) => void;
   updateOrder: (id: string, updates: Partial<Omit<Order, 'id'>>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
@@ -85,6 +88,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     chatMessages: [],
   });
   const [loaded, setLoaded] = useState(false);
+  const [today, setToday] = useState(localDateKey);
   const [syncInfo, setSyncInfo] = useState<SyncInfo>({
     available: false,
     key: '',
@@ -114,6 +118,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       error: '',
     });
     setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const refreshDate = () => setToday(localDateKey());
+    const scheduleMidnight = () => {
+      timer = window.setTimeout(() => {
+        refreshDate();
+        scheduleMidnight();
+      }, millisecondsUntilNextLocalDay());
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshDate();
+    };
+    scheduleMidnight();
+    window.addEventListener('focus', refreshDate);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      window.removeEventListener('focus', refreshDate);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   const applyCloudState = useCallback((data: AppState, revision: number, updatedAt: string) => {
@@ -429,6 +455,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!loaded) return;
+    const activePlan = state.feedingPlans.find(plan => plan.active);
+    if (!activePlan) return;
+    const records = plannedFeedingRecordsForDate(activePlan, today);
+    if (records.length > 0) syncPlannedFeedingRecords(today, activePlan.id, records);
+  }, [loaded, state.feedingPlans, syncPlannedFeedingRecords, today]);
+
   const updateFeedingRecord = useCallback((id: string, updates: Partial<FeedingRecord>) => {
     setState(prev => {
       const current = prev.feedingRecords.find(record => record.id === id);
@@ -578,7 +612,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
+    <AppContext.Provider value={{ state, today, addOrder, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
       {children}
     </AppContext.Provider>
   );

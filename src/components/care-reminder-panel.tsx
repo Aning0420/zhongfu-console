@@ -21,10 +21,9 @@ const repeatLabels: Record<CareReminder['repeat'], string> = {
 };
 
 export function CareReminderPanel({ records }: { records: HealthRecord[] }) {
-  const { addHealthRecord, updateHealthRecord, deleteHealthRecord } = useAppContext();
+  const { today, addHealthRecord, updateHealthRecord, deleteHealthRecord } = useAppContext();
   const [open, setOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HealthRecord | undefined>();
-  const today = new Date().toISOString().split('T')[0];
   const sortedRecords = [...records].sort((a, b) => {
     const completedDiff = Number(a.reminder?.completed) - Number(b.reminder?.completed);
     return completedDiff || a.date.localeCompare(b.date);
@@ -142,8 +141,9 @@ function ReminderDialog({ open, initialRecord, onClose, onSave }: {
   onClose: () => void;
   onSave: (date: string, title: string, detail: string, reminder: CareReminder) => void;
 }) {
+  const { today } = useAppContext();
   const [form, setForm] = useState({
-    title: initialRecord?.title || '', detail: initialRecord?.detail || '', date: initialRecord?.date || new Date().toISOString().split('T')[0], time: initialRecord?.reminder?.time || '09:00',
+    title: initialRecord?.title || '', detail: initialRecord?.detail || '', date: initialRecord?.date || today, time: initialRecord?.reminder?.time || '09:00',
     kind: initialRecord?.reminder?.kind || 'care' as CareReminder['kind'], repeat: initialRecord?.reminder?.repeat || 'none' as CareReminder['repeat'],
   });
 
