@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronLeft, ChevronRight, Plus, Check, Coffee, Sun, Moon, Candy, Zap, Minus, Snail, Heart, Trash2, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { FeedingPlanStage, FeedingRecord } from '@/lib/store';
+import { conciseFeedingNote, type FeedingPlanStage, type FeedingRecord } from '@/lib/store';
 import { FeedingPlanManager } from '@/components/feeding-plan-manager';
 
 const mealIcons = {
@@ -110,7 +110,7 @@ export default function FeedingPage() {
     const plannedRecords = activeStage.mealSchedule.map(meal => {
       const mealType = mealTypeForTime(meal.time);
       const foodName = mealFoodForDate(activeStage, selectedDate, meal.food);
-      const note = [meal.note, activeStage.supplements].filter(Boolean).join('；');
+      const note = meal.note.trim();
       return {
         date: selectedDate,
         mealType,
@@ -347,7 +347,7 @@ export default function FeedingPage() {
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <p className="text-xs text-muted-foreground">
-                                    {record.plannedTime ? `${record.plannedTime} · ` : ''}{record.foodName} · {record.amount}
+                                    {record.plannedTime ? `${record.plannedTime} · ` : ''}{record.foodName}{record.planId ? '' : ` · ${record.amount}`}
                                   </p>
                                   {record.planId && !record.completed && (
                                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary-foreground">计划</span>
@@ -358,8 +358,8 @@ export default function FeedingPage() {
                                     </span>
                                   )}
                                 </div>
-                                {record.note && (
-                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{record.note}</p>
+                                {conciseFeedingNote(record) && (
+                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{conciseFeedingNote(record)}</p>
                                 )}
                                 {record.remainingAmount && (
                                   <p className="mt-0.5 text-xs text-muted-foreground/70">剩余：{record.remainingAmount}</p>

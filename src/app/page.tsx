@@ -20,7 +20,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { calcDailyUsage } from '@/lib/store';
+import { calcDailyUsage, conciseFeedingNote } from '@/lib/store';
 
 export default function DashboardPage() {
   const { state, toggleFeedingComplete } = useAppContext();
@@ -189,7 +189,11 @@ export default function DashboardPage() {
                     <p className={cn('text-sm font-medium', record.completed ? 'text-muted-foreground line-through' : 'text-foreground')}>
                       {record.mealType === 'breakfast' ? '早餐' : record.mealType === 'lunch' ? '午餐' : record.mealType === 'dinner' ? '晚餐' : '零食'} · {record.foodName}
                     </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{record.amount}{record.note ? ` · ${record.note}` : ''}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {record.planId && record.plannedTime ? record.plannedTime : record.amount}
+                      {conciseFeedingNote(record) ? ` · ${conciseFeedingNote(record)}` : ''}
+                      {record.remainingAmount ? ` · 剩余 ${record.remainingAmount}` : ''}
+                    </p>
                   </div>
                   {record.eatingSpeed && (
                     <span className="text-xs text-muted-foreground shrink-0">

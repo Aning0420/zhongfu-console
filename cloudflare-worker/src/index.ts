@@ -223,7 +223,7 @@ function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null 
       : mealTimes.map(time => ({ time, food: '按本阶段说明执行', note: '' }));
     const supplementLines = block.split('\n')
       .map(line => line.replace(/^\s*[-*]\s*/, '').trim())
-      .filter(line => !/^\d{2}:\d{2}\s*[｜|]/.test(line) && /用药|乳铁蛋白|益生菌|补充剂/.test(line));
+      .filter(line => /^(?:营养补充|补充剂|用药)\s*[:：]/.test(line));
     const description = [index === 0 ? prelude : '', block]
       .filter(Boolean)
       .join('\n\n')

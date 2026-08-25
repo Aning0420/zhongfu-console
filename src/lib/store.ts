@@ -189,6 +189,15 @@ export function saveState(state: AppState): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+export function conciseFeedingNote(record: FeedingRecord): string {
+  const note = record.note.trim();
+  if (!note || !record.planId) return note;
+  return note
+    .split(/\s*(?:；|\n)?\s*(?=(?:阶段\s*\d*|阶段说明|开始日期|结束日期|进入(?:下一)?阶段条件|设为当前计划)\s*[:：])/)[0]
+    .replace(/[；|、\s]+$/, '')
+    .trim();
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
