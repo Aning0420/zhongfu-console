@@ -234,7 +234,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateOrderStatus = useCallback((id: string, status: Order['status']) => {
     setState(prev => ({
       ...prev,
-      orders: prev.orders.map(o => o.id === id ? { ...o, status } : o),
+      orders: prev.orders.map(order => {
+        if (order.id !== id) return order;
+        if (status === 'finished' && order.status !== 'finished') {
+          return {
+            ...order,
+            status,
+            consumedBeforeFinished: order.consumed,
+            consumed: order.quantity,
+          };
+        }
+        if (order.status === 'finished' && status === 'delivered') {
+          return {
+            ...order,
+            status,
+            consumed: Math.min(order.quantity, order.consumedBeforeFinished ?? order.consumed),
+            consumedBeforeFinished: undefined,
+          };
+        }
+        return { ...order, status };
+      }),
     }));
   }, []);
 

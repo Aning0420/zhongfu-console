@@ -45,7 +45,7 @@ function buildAssistantContext(state: AppState): string {
   const activePlan = state.feedingPlans.find(plan => plan.active);
   const activeStage = activePlan?.stages.find(stage => stage.startDate <= today && stage.endDate >= today);
   const inventory = state.orders
-    .filter(order => order.status !== 'cancelled' && order.quantity - order.consumed > 0)
+    .filter(order => order.status !== 'cancelled' && order.status !== 'finished' && order.quantity - order.consumed > 0)
     .slice(-20)
     .map(order => ({ item: order.itemName, category: order.category, remaining: order.quantity - order.consumed, unit: order.unit }));
   const recentHealth = [...state.healthRecords]

@@ -8,8 +8,9 @@ export interface Order {
   /** Amount actually paid for this purchase. Older records only have unitPrice. */
   totalPrice?: number;
   purchaseDate: string;
-  status: 'pending' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending' | 'shipped' | 'delivered' | 'finished' | 'cancelled';
   consumed: number;
+  consumedBeforeFinished?: number;
   supplier: string;
   productionDate?: string;
   shelfLife?: number; // days

@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, getPriceHistory, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, Package, PackageMinus, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, Package, PackageMinus, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -20,6 +20,7 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
   shipped: { label: '运输中', icon: Truck, color: 'text-[#87CEEB] bg-[#87CEEB]/10' },
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
+  finished: { label: '已用完·不回购', icon: PackageCheck, color: 'text-muted-foreground bg-muted' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
 
@@ -37,7 +38,8 @@ const statusSortOrder: Record<Order['status'], number> = {
   pending: 0,
   shipped: 1,
   delivered: 2,
-  cancelled: 3,
+  finished: 3,
+  cancelled: 4,
 };
 const chineseCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 
@@ -401,6 +403,7 @@ export default function ProcurementPage() {
             <SelectItem value="pending">待发货</SelectItem>
             <SelectItem value="shipped">运输中</SelectItem>
             <SelectItem value="delivered">已到货</SelectItem>
+            <SelectItem value="finished">已用完·不回购</SelectItem>
             <SelectItem value="cancelled">已取消</SelectItem>
           </SelectContent>
         </Select>
@@ -539,6 +542,28 @@ export default function ProcurementPage() {
                         {order.status === 'delivered' && remaining > 0 && (
                           <Button variant="ghost" size="sm" onClick={() => setUsageOrder(order)} className="text-xs h-7 text-accent-foreground">
                             <PackageMinus className="w-3.5 h-3.5 mr-1" />领用
+                          </Button>
+                        )}
+                        {order.status === 'delivered' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="库存归零，并停止临期、缺货和回购提醒"
+                            onClick={() => updateOrderStatus(order.id, 'finished')}
+                            className="text-xs h-7 text-muted-foreground"
+                          >
+                            <PackageCheck className="w-3.5 h-3.5 mr-1" />用完不回购
+                          </Button>
+                        )}
+                        {order.status === 'finished' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="恢复为已到货，并恢复标记前的库存"
+                            onClick={() => updateOrderStatus(order.id, 'delivered')}
+                            className="text-xs h-7 text-primary"
+                          >
+                            恢复使用
                           </Button>
                         )}
                         {order.status === 'pending' && (
