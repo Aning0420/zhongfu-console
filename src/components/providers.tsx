@@ -1,7 +1,21 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
-import { loadState, parseBackup, saveState, type AppState, type Order, type FeedingRecord, type FeedingPlan, type HealthRecord, type Expense, type ChatMessage } from '@/lib/store';
+import {
+  deductInventoryForFeeding,
+  convertInventoryAmount,
+  loadState,
+  parseBackup,
+  restoreInventoryDeductions,
+  saveState,
+  type AppState,
+  type Order,
+  type FeedingRecord,
+  type FeedingPlan,
+  type HealthRecord,
+  type Expense,
+  type ChatMessage,
+} from '@/lib/store';
 import {
   clearStoredSyncKey,
   cloudSyncAvailable,
@@ -23,10 +37,11 @@ export interface SyncInfo {
 interface AppContextType {
   state: AppState;
   addOrder: (order: Omit<Order, 'id'>) => void;
+  updateOrder: (id: string, updates: Partial<Omit<Order, 'id'>>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
   markOrderRepurchased: (id: string, date: string) => void;
   updateOrderCategory: (id: string, category: string) => void;
-  recordOrderUsage: (id: string, amount: number) => void;
+  adjustOrderStock: (id: string, mode: 'consume' | 'restore', amount: number) => void;
   deleteOrder: (id: string) => void;
   addFeedingRecord: (record: Omit<FeedingRecord, 'id'>) => void;
   syncPlannedFeedingRecords: (date: string, planId: string, records: Omit<FeedingRecord, 'id'>[]) => void;
@@ -232,6 +247,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, orders: [...prev.orders, newOrder] }));
   }, []);
 
+  const updateOrder = useCallback((id: string, updates: Partial<Omit<Order, 'id'>>) => {
+    setState(prev => ({
+      ...prev,
+      orders: prev.orders.map(order => {
+        if (order.id !== id) return order;
+        const quantity = Number.isFinite(updates.quantity) && (updates.quantity ?? 0) > 0
+          ? updates.quantity!
+          : order.quantity;
+        const nextUnit = updates.unit?.trim() || order.unit;
+        const convertedConsumed = nextUnit !== order.unit
+          ? convertInventoryAmount(order.consumed, order.unit, nextUnit) ?? order.consumed
+          : order.consumed;
+        const convertedBeforeFinished = order.consumedBeforeFinished === undefined
+          ? undefined
+          : nextUnit !== order.unit
+            ? convertInventoryAmount(order.consumedBeforeFinished, order.unit, nextUnit) ?? order.consumedBeforeFinished
+            : order.consumedBeforeFinished;
+        const nextStatus = updates.status ?? order.status;
+        const next = {
+          ...order,
+          ...updates,
+          quantity,
+          unit: nextUnit,
+          consumed: Math.min(quantity, convertedConsumed),
+        };
+
+        if (nextStatus === 'finished') {
+          return {
+            ...next,
+            status: nextStatus,
+            consumedBeforeFinished: order.status === 'finished'
+              ? Math.min(quantity, convertedBeforeFinished ?? convertedConsumed)
+              : Math.min(quantity, convertedConsumed),
+            consumed: quantity,
+          };
+        }
+        if (order.status === 'finished') {
+          return {
+            ...next,
+            status: nextStatus,
+            consumed: Math.min(quantity, convertedBeforeFinished ?? 0),
+            consumedBeforeFinished: undefined,
+          };
+        }
+        return { ...next, status: nextStatus, consumedBeforeFinished: undefined };
+      }),
+    }));
+  }, []);
+
   const updateOrderStatus = useCallback((id: string, status: Order['status']) => {
     setState(prev => ({
       ...prev,
@@ -245,7 +309,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             consumed: order.quantity,
           };
         }
-        if (order.status === 'finished' && status === 'delivered') {
+        if (order.status === 'finished' && status !== 'finished') {
           return {
             ...order,
             status,
@@ -272,14 +336,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const recordOrderUsage = useCallback((id: string, amount: number) => {
+  const adjustOrderStock = useCallback((id: string, mode: 'consume' | 'restore', amount: number) => {
     if (!Number.isFinite(amount) || amount <= 0) return;
 
     setState(prev => {
       const order = prev.orders.find(item => item.id === id);
       if (!order) return prev;
 
-      const consumed = Math.min(order.quantity, order.consumed + amount);
+      const consumed = mode === 'consume'
+        ? Math.min(order.quantity, order.consumed + amount)
+        : Math.max(0, order.consumed - amount);
 
       return {
         ...prev,
@@ -294,8 +360,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addFeedingRecord = useCallback((record: Omit<FeedingRecord, 'id'>) => {
     const id = genId('f');
-    const newRecord = { ...record, id };
-    setState(prev => ({ ...prev, feedingRecords: [...prev.feedingRecords, newRecord] }));
+    setState(prev => {
+      const baseRecord = { ...record, id, inventoryDeductions: undefined };
+      const result = deductInventoryForFeeding(baseRecord, prev.orders);
+      const newRecord = result.deductions.length > 0
+        ? { ...baseRecord, inventoryDeductions: result.deductions }
+        : baseRecord;
+      return { ...prev, orders: result.orders, feedingRecords: [...prev.feedingRecords, newRecord] };
+    });
   }, []);
 
   const syncPlannedFeedingRecords = useCallback((date: string, planId: string, records: Omit<FeedingRecord, 'id'>[]) => {
@@ -335,21 +407,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateFeedingRecord = useCallback((id: string, updates: Partial<FeedingRecord>) => {
-    setState(prev => ({
-      ...prev,
-      feedingRecords: prev.feedingRecords.map(r => r.id === id ? { ...r, ...updates } : r),
-    }));
+    setState(prev => {
+      const current = prev.feedingRecords.find(record => record.id === id);
+      if (!current) return prev;
+      const shouldRecalculate = ['foodName', 'amount', 'remainingAmount', 'completed']
+        .some(field => Object.prototype.hasOwnProperty.call(updates, field));
+      if (!shouldRecalculate) {
+        return {
+          ...prev,
+          feedingRecords: prev.feedingRecords.map(record => record.id === id ? { ...record, ...updates } : record),
+        };
+      }
+
+      const restoredOrders = restoreInventoryDeductions(prev.orders, current.inventoryDeductions);
+      const nextRecord = { ...current, ...updates, inventoryDeductions: undefined };
+      const result = deductInventoryForFeeding(nextRecord, restoredOrders);
+      const storedRecord = result.deductions.length > 0
+        ? { ...nextRecord, inventoryDeductions: result.deductions }
+        : nextRecord;
+      return {
+        ...prev,
+        orders: result.orders,
+        feedingRecords: prev.feedingRecords.map(record => record.id === id ? storedRecord : record),
+      };
+    });
   }, []);
 
   const deleteFeedingRecord = useCallback((id: string) => {
-    setState(prev => ({ ...prev, feedingRecords: prev.feedingRecords.filter(r => r.id !== id) }));
+    setState(prev => {
+      const record = prev.feedingRecords.find(item => item.id === id);
+      return {
+        ...prev,
+        orders: restoreInventoryDeductions(prev.orders, record?.inventoryDeductions),
+        feedingRecords: prev.feedingRecords.filter(item => item.id !== id),
+      };
+    });
   }, []);
 
   const toggleFeedingComplete = useCallback((id: string) => {
-    setState(prev => ({
-      ...prev,
-      feedingRecords: prev.feedingRecords.map(r => r.id === id ? { ...r, completed: !r.completed } : r),
-    }));
+    setState(prev => {
+      const current = prev.feedingRecords.find(record => record.id === id);
+      if (!current) return prev;
+      if (current.completed) {
+        const nextRecord = { ...current, completed: false, inventoryDeductions: undefined };
+        return {
+          ...prev,
+          orders: restoreInventoryDeductions(prev.orders, current.inventoryDeductions),
+          feedingRecords: prev.feedingRecords.map(record => record.id === id ? nextRecord : record),
+        };
+      }
+
+      const nextRecord = { ...current, completed: true, inventoryDeductions: undefined };
+      const result = deductInventoryForFeeding(nextRecord, prev.orders);
+      const storedRecord = result.deductions.length > 0
+        ? { ...nextRecord, inventoryDeductions: result.deductions }
+        : nextRecord;
+      return {
+        ...prev,
+        orders: result.orders,
+        feedingRecords: prev.feedingRecords.map(record => record.id === id ? storedRecord : record),
+      };
+    });
   }, []);
 
   const addFeedingPlan = useCallback((plan: Omit<FeedingPlan, 'id' | 'createdAt'>) => {
@@ -437,7 +555,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, addOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, recordOrderUsage, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
+    <AppContext.Provider value={{ state, addOrder, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
       {children}
     </AppContext.Provider>
   );

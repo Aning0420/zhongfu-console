@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, getPriceHistory, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageMinus, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -106,7 +106,7 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
 }
 
 export default function ProcurementPage() {
-  const { state, addOrder, updateOrderStatus, updateOrderCategory, recordOrderUsage, deleteOrder, addExpense } = useAppContext();
+  const { state, addOrder, updateOrder, updateOrderStatus, updateOrderCategory, adjustOrderStock, deleteOrder, addExpense } = useAppContext();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -114,7 +114,8 @@ export default function ProcurementPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [sortReady, setSortReady] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [usageOrder, setUsageOrder] = useState<Order | null>(null);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [stockAdjustment, setStockAdjustment] = useState<{ order: Order; mode: 'consume' | 'restore' } | null>(null);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
 
   useEffect(() => {
@@ -544,52 +545,38 @@ export default function ProcurementPage() {
                       })()}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', st.color)}>
-                        <st.icon className="w-3 h-3" />
-                        {st.label}
-                      </span>
+                      <Select value={order.status} onValueChange={status => updateOrderStatus(order.id, status as Order['status'])}>
+                        <SelectTrigger size="sm" className={cn('w-[132px] border-0 shadow-none', st.color)} aria-label={`修改${order.itemName}的状态`}>
+                          <st.icon className="h-3.5 w-3.5 shrink-0" />
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(Object.entries(statusMap) as [Order['status'], (typeof statusMap)[Order['status']]][]).map(([value, status]) => (
+                            <SelectItem key={value} value={value}>{status.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        {order.status === 'delivered' && remaining > 0 && (
-                          <Button variant="ghost" size="sm" onClick={() => setUsageOrder(order)} className="text-xs h-7 text-accent-foreground">
-                            <PackageMinus className="w-3.5 h-3.5 mr-1" />领用
-                          </Button>
-                        )}
-                        {order.status === 'delivered' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="库存归零，并停止临期、缺货和回购提醒"
-                            onClick={() => updateOrderStatus(order.id, 'finished')}
-                            className="text-xs h-7 text-muted-foreground"
-                          >
-                            <PackageCheck className="w-3.5 h-3.5 mr-1" />用完不回购
-                          </Button>
-                        )}
-                        {order.status === 'finished' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="恢复为已到货，并恢复标记前的库存"
-                            onClick={() => updateOrderStatus(order.id, 'delivered')}
-                            className="text-xs h-7 text-primary"
-                          >
-                            恢复使用
-                          </Button>
-                        )}
-                        {order.status === 'pending' && (
-                          <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'shipped')} className="text-xs h-7">
-                            标记发货
-                          </Button>
-                        )}
-                        {order.status === 'shipped' && (
-                          <Button variant="ghost" size="sm" onClick={() => updateOrderStatus(order.id, 'delivered')} className="text-xs h-7 text-primary">
-                            确认到货
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="sm" onClick={() => { if (confirm('确定删除该订单？')) deleteOrder(order.id); }} className="text-xs h-7 text-destructive">
-                          删除
+                      <div className="flex min-w-[246px] items-center gap-1.5">
+                        <Select
+                          value=""
+                          onValueChange={mode => setStockAdjustment({ order, mode: mode as 'consume' | 'restore' })}
+                          disabled={order.status !== 'delivered' || (remaining <= 0 && order.consumed <= 0)}
+                        >
+                          <SelectTrigger size="sm" className="w-[104px]" aria-label={`调整${order.itemName}的库存`}>
+                            <SelectValue placeholder="库存操作" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="consume" disabled={remaining <= 0}>领用</SelectItem>
+                            <SelectItem value="restore" disabled={order.consumed <= 0}>退回</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button variant="ghost" size="icon-sm" onClick={() => setEditingOrder(order)} title="编辑采购记录" aria-label={`编辑${order.itemName}`}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => { if (confirm('确定删除该订单？')) deleteOrder(order.id); }} className="text-destructive" title="删除采购记录" aria-label={`删除${order.itemName}`}>
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </td>
@@ -603,14 +590,27 @@ export default function ProcurementPage() {
           )}
         </div>
       </div>
-      {usageOrder && (
-        <UsageDialog
-          key={usageOrder.id}
-          order={usageOrder}
-          onClose={() => setUsageOrder(null)}
+      {stockAdjustment && (
+        <InventoryAdjustmentDialog
+          key={`${stockAdjustment.order.id}-${stockAdjustment.mode}`}
+          order={stockAdjustment.order}
+          mode={stockAdjustment.mode}
+          onClose={() => setStockAdjustment(null)}
           onConfirm={amount => {
-            recordOrderUsage(usageOrder.id, amount);
-            setUsageOrder(null);
+            adjustOrderStock(stockAdjustment.order.id, stockAdjustment.mode, amount);
+            setStockAdjustment(null);
+          }}
+        />
+      )}
+      {editingOrder && (
+        <EditOrderDialog
+          key={editingOrder.id}
+          order={editingOrder}
+          orders={state.orders}
+          onClose={() => setEditingOrder(null)}
+          onSave={updates => {
+            updateOrder(editingOrder.id, updates);
+            setEditingOrder(null);
           }}
         />
       )}
@@ -626,33 +626,43 @@ export default function ProcurementPage() {
   );
 }
 
-function UsageDialog({ order, onClose, onConfirm }: { order: Order; onClose: () => void; onConfirm: (amount: number) => void }) {
+function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
+  order: Order;
+  mode: 'consume' | 'restore';
+  onClose: () => void;
+  onConfirm: (amount: number) => void;
+}) {
   const remaining = Math.max(0, order.quantity - order.consumed);
-  const suggested = order.dailyUsage && order.dailyUsage > 0 ? Math.min(order.dailyUsage, remaining) : Math.min(1, remaining);
+  const maximum = mode === 'consume' ? remaining : order.consumed;
+  const suggested = mode === 'consume' && order.dailyUsage && order.dailyUsage > 0
+    ? Math.min(order.dailyUsage, maximum)
+    : Math.min(1, maximum);
   const [amount, setAmount] = useState(String(suggested));
   const parsedAmount = Number(amount);
-  const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount <= remaining;
+  const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount <= maximum;
+  const verb = mode === 'consume' ? '领用' : '退回';
+  const afterRemaining = mode === 'consume' ? remaining - parsedAmount : remaining + parsedAmount;
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>记录库存领用</DialogTitle>
+          <DialogTitle>确认库存{verb}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="rounded-lg bg-muted/45 px-3 py-3">
             <p className="text-sm font-medium text-foreground">{order.itemName}</p>
-            <p className="text-xs text-muted-foreground mt-1">当前可用 {remaining}{order.unit}</p>
+            <p className="text-xs text-muted-foreground mt-1">当前可用 {remaining}{order.unit}，已领用 {order.consumed}{order.unit}</p>
           </div>
           <div className="space-y-1.5">
-            <Label>本次领用数量（{order.unit}）</Label>
-            <Input type="number" min="0" max={remaining} step="any" value={amount} onChange={event => setAmount(event.target.value)} autoFocus />
-            {!valid && amount !== '' && <p className="text-xs text-destructive">数量必须大于 0，且不能超过当前库存。</p>}
+            <Label>本次{verb}数量（{order.unit}）</Label>
+            <Input type="number" min="0" max={maximum} step="any" value={amount} onChange={event => setAmount(event.target.value)} autoFocus />
+            {!valid && amount !== '' && <p className="text-xs text-destructive">数量必须大于 0，且不能超过{mode === 'consume' ? '当前库存' : '已领用数量'}。</p>}
           </div>
-          <p className="text-xs text-muted-foreground">确认后剩余 {valid ? Math.max(0, remaining - parsedAmount) : remaining}{order.unit}，补货提醒会自动重算。</p>
+          <p className="text-xs text-muted-foreground">确认后剩余 {valid ? afterRemaining : remaining}{order.unit}，补货提醒会自动重算。</p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose}>取消</Button>
-            <Button disabled={!valid} onClick={() => onConfirm(parsedAmount)} className="bg-primary text-primary-foreground hover:bg-primary/90">确认领用</Button>
+            <Button disabled={!valid} onClick={() => onConfirm(parsedAmount)} className="bg-primary text-primary-foreground hover:bg-primary/90">确认{verb}</Button>
           </div>
         </div>
       </DialogContent>
@@ -678,6 +688,139 @@ function PriceChangeLabel({ history }: { history: NonNullable<ReturnType<typeof 
     <div className={cn('mt-0.5 whitespace-nowrap text-xs', lower ? 'text-[#3F8A61]' : 'text-[#C56C5C]')}>
       比上次{lower ? '低' : '高'} {Math.abs(history.changePercent).toFixed(1)}%
     </div>
+  );
+}
+
+function EditOrderDialog({ order, orders, onClose, onSave }: {
+  order: Order;
+  orders: Order[];
+  onClose: () => void;
+  onSave: (updates: Partial<Omit<Order, 'id'>>) => void;
+}) {
+  const [form, setForm] = useState({
+    itemName: order.itemName,
+    category: order.category,
+    quantity: String(order.quantity),
+    unit: order.unit,
+    totalPrice: String(orderTotalPrice(order)),
+    supplier: order.supplier,
+    purchaseDate: order.purchaseDate,
+    productionDate: order.productionDate || '',
+    shelfLife: order.shelfLife ? String(order.shelfLife) : '',
+    status: order.status,
+  });
+  const quantity = Number(form.quantity);
+  const totalPrice = Number(form.totalPrice);
+  const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
+  const comparableOrders = orders.filter(item => item.id !== order.id);
+  const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, comparableOrders);
+  const valid = Boolean(
+    form.itemName.trim()
+    && form.unit.trim()
+    && form.purchaseDate
+    && Number.isFinite(quantity)
+    && quantity > 0
+    && Number.isFinite(totalPrice)
+    && totalPrice >= 0
+  );
+
+  const handleSave = () => {
+    if (!valid) return;
+    onSave({
+      itemName: form.itemName.trim(),
+      category: form.category,
+      quantity,
+      unit: form.unit.trim(),
+      unitPrice,
+      totalPrice,
+      supplier: form.supplier.trim(),
+      purchaseDate: form.purchaseDate,
+      productionDate: form.productionDate || undefined,
+      shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
+      status: form.status,
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>编辑采购记录</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-1">
+          <div className="space-y-1.5">
+            <Label>物资名称</Label>
+            <Input value={form.itemName} onChange={event => setForm(current => ({ ...current, itemName: event.target.value }))} />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>分类</Label>
+              <Select value={form.category} onValueChange={category => setForm(current => ({ ...current, category }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><InventoryCategoryOptions /></SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>状态</Label>
+              <Select value={form.status} onValueChange={status => setForm(current => ({ ...current, status: status as Order['status'] }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(statusMap) as [Order['status'], (typeof statusMap)[Order['status']]][]).map(([value, status]) => (
+                    <SelectItem key={value} value={value}>{status.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>数量</Label>
+              <Input type="number" min="0" step="any" value={form.quantity} onChange={event => setForm(current => ({ ...current, quantity: event.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>单位</Label>
+              <Input value={form.unit} onChange={event => setForm(current => ({ ...current, unit: event.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>本次总价(¥)</Label>
+              <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={event => setForm(current => ({ ...current, totalPrice: event.target.value }))} />
+            </div>
+          </div>
+          {unitPrice > 0 && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
+              <div className="font-medium text-foreground">自动换算：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
+              {priceHistory && <PriceChangeLabel history={priceHistory} />}
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>供应商</Label>
+              <Input value={form.supplier} onChange={event => setForm(current => ({ ...current, supplier: event.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>采购日期</Label>
+              <Input type="date" value={form.purchaseDate} onChange={event => setForm(current => ({ ...current, purchaseDate: event.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>生产日期</Label>
+              <Input type="date" value={form.productionDate} onChange={event => setForm(current => ({ ...current, productionDate: event.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>保质期（天）</Label>
+              <Input type="number" min="0" step="1" value={form.shelfLife} onChange={event => setForm(current => ({ ...current, shelfLife: event.target.value }))} placeholder="可不填" />
+            </div>
+          </div>
+          {quantity < order.consumed && (
+            <p className="text-xs text-[#C56C5C]">总数量小于当前已领用数量，保存后已领用数量会同步调整为 {quantity}{form.unit}。</p>
+          )}
+          <p className="text-xs text-muted-foreground">这里仅修改采购记录；新建采购时同步生成的历史支出不会自动改动。</p>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={onClose}>取消</Button>
+            <Button disabled={!valid} onClick={handleSave}>保存修改</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

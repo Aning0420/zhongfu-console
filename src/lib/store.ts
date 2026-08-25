@@ -80,6 +80,147 @@ export interface FeedingRecord {
   plannedTime?: string;
   planId?: string;
   planStageId?: string;
+  inventoryDeductions?: InventoryDeduction[];
+}
+
+export interface InventoryDeduction {
+  orderId: string;
+  amount: number;
+  unit?: string;
+}
+
+interface ParsedAmount {
+  value: number;
+  unit: string;
+}
+
+const AMOUNT_PATTERN = /(\d+(?:\.\d+)?)\s*(kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/i;
+
+function normalizeStockProductName(value: string): string {
+  return normalizeProductIdentity(
+    value.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '')
+  );
+}
+
+function parseAmount(value?: string): ParsedAmount | null {
+  const match = value?.match(AMOUNT_PATTERN);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  return Number.isFinite(amount) && amount > 0 ? { value: amount, unit: match[2].toLowerCase() } : null;
+}
+
+function unitInfo(rawUnit: string): { family: string; factor: number; unit: string } {
+  const unit = rawUnit.trim().toLowerCase();
+  if (['kg', '公斤', '千克'].includes(unit)) return { family: 'mass', factor: 1000, unit: 'kg' };
+  if (['g', '克'].includes(unit)) return { family: 'mass', factor: 1, unit: 'g' };
+  if (['mg', '毫克'].includes(unit)) return { family: 'mass', factor: 0.001, unit: 'mg' };
+  if (['l', '升'].includes(unit)) return { family: 'volume', factor: 1000, unit: 'l' };
+  if (['ml', '毫升'].includes(unit)) return { family: 'volume', factor: 1, unit: 'ml' };
+  return { family: `count:${unit}`, factor: 1, unit };
+}
+
+export function convertInventoryAmount(value: number, fromUnit: string, toUnit: string): number | null {
+  const from = unitInfo(fromUnit);
+  const to = unitInfo(toUnit);
+  if (!from.unit || !to.unit || from.family !== to.family) return null;
+  return (value * from.factor) / to.factor;
+}
+
+function roundInventory(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]): {
+  orders: Order[];
+  deductions: InventoryDeduction[];
+} {
+  if (!record.completed) return { orders, deductions: [] };
+
+  const source = `${record.foodName} ${record.amount}`;
+  const normalizedSource = normalizeStockProductName(record.foodName);
+  const groups = new Map<string, { name: string; orders: Order[]; position: number }>();
+
+  orders.forEach(order => {
+    if (order.status !== 'delivered' || order.quantity - order.consumed <= 0) return;
+    const key = normalizeStockProductName(order.itemName);
+    // A generic label such as "猫粮" must not guess between multiple branded products.
+    if (!key || !normalizedSource.includes(key)) return;
+    const current = groups.get(key);
+    const position = normalizedSource.indexOf(key);
+    if (current) current.orders.push(order);
+    else groups.set(key, { name: order.itemName, orders: [order], position: position < 0 ? Number.MAX_SAFE_INTEGER : position });
+  });
+
+  const usages = Array.from(groups.values())
+    .sort((a, b) => a.position - b.position || b.name.length - a.name.length)
+    .map((group, index, allGroups) => {
+      const displayName = group.name.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '').trim();
+      const literalIndex = source.toLocaleLowerCase('zh-CN').indexOf(displayName.toLocaleLowerCase('zh-CN'));
+      const nearby = literalIndex >= 0
+        ? source.slice(literalIndex + displayName.length, literalIndex + displayName.length + 36).split(/[；;｜|\n]/)[0]
+        : '';
+      const amount = parseAmount(nearby) || (allGroups.length === 1 || index === 0 ? parseAmount(record.amount) : null);
+      return amount ? { group, amount } : null;
+    })
+    .filter((usage): usage is NonNullable<typeof usage> => usage !== null);
+
+  const remaining = parseAmount(record.remainingAmount);
+  if (remaining) {
+    for (const usage of usages) {
+      const converted = convertInventoryAmount(remaining.value, remaining.unit, usage.amount.unit);
+      if (converted === null) continue;
+      usage.amount.value = Math.max(0, usage.amount.value - converted);
+      break;
+    }
+  }
+
+  const consumedByOrder = new Map<string, number>();
+  usages.forEach(({ group, amount }) => {
+    let amountLeft = amount.value;
+    group.orders
+      .slice()
+      .sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || a.id.localeCompare(b.id))
+      .forEach(order => {
+        if (amountLeft <= 0) return;
+        const requestedInOrderUnit = convertInventoryAmount(amountLeft, amount.unit, order.unit);
+        if (requestedInOrderUnit === null) return;
+        const available = Math.max(0, order.quantity - order.consumed);
+        const taken = Math.min(available, requestedInOrderUnit);
+        if (taken <= 0) return;
+        consumedByOrder.set(order.id, roundInventory((consumedByOrder.get(order.id) || 0) + taken));
+        const takenInUsageUnit = convertInventoryAmount(taken, order.unit, amount.unit) || 0;
+        amountLeft = Math.max(0, amountLeft - takenInUsageUnit);
+      });
+  });
+
+  const deductions = Array.from(consumedByOrder, ([orderId, amount]) => ({
+    orderId,
+    amount,
+    unit: orders.find(order => order.id === orderId)?.unit,
+  }));
+  if (deductions.length === 0) return { orders, deductions };
+  return {
+    orders: orders.map(order => {
+      const amount = consumedByOrder.get(order.id);
+      return amount ? { ...order, consumed: roundInventory(Math.min(order.quantity, order.consumed + amount)) } : order;
+    }),
+    deductions,
+  };
+}
+
+export function restoreInventoryDeductions(orders: Order[], deductions?: InventoryDeduction[]): Order[] {
+  if (!deductions?.length) return orders;
+  return orders.map(order => {
+    const amount = deductions
+      .filter(deduction => deduction.orderId === order.id)
+      .reduce((sum, deduction) => {
+        const converted = deduction.unit
+          ? convertInventoryAmount(deduction.amount, deduction.unit, order.unit)
+          : deduction.amount;
+        return sum + (converted ?? 0);
+      }, 0);
+    return amount ? { ...order, consumed: roundInventory(Math.max(0, order.consumed - amount)) } : order;
+  });
 }
 
 // 喂食计划阶段
