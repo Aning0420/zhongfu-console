@@ -93,7 +93,7 @@ export default function HealthPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="card-warm p-4">
+        <button type="button" onClick={() => setActiveTab('observations')} aria-pressed={activeTab === 'observations'} className={cn('card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40', activeTab === 'observations' && 'border-primary/45 bg-primary/5')}>
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-primary/8 flex items-center justify-center">
               <Activity className="w-4 h-4 text-primary" />
@@ -101,8 +101,8 @@ export default function HealthPage() {
             <span className="text-xs text-muted-foreground">今日观察</span>
           </div>
           <p className="text-xl sm:text-2xl font-bold text-foreground">{todayObserved ? '已记录' : '待记录'}</p>
-        </div>
-        <div className="card-warm p-4">
+        </button>
+        <button type="button" onClick={() => setActiveTab('reminders')} aria-pressed={activeTab === 'reminders'} className={cn('card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40', activeTab === 'reminders' && 'border-primary/45 bg-primary/5')}>
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-accent/8 flex items-center justify-center">
               <Bell className="w-4 h-4 text-accent" />
@@ -110,8 +110,8 @@ export default function HealthPage() {
             <span className="text-xs text-muted-foreground">到期提醒</span>
           </div>
           <p className="text-xl sm:text-2xl font-bold text-foreground">{dueReminders}</p>
-        </div>
-        <div className="card-warm p-4">
+        </button>
+        <button type="button" onClick={() => setActiveTab('weight')} aria-pressed={activeTab === 'weight'} className={cn('card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40', activeTab === 'weight' && 'border-primary/45 bg-primary/5')}>
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-primary/8 flex items-center justify-center">
               <Scale className="w-4 h-4 text-primary" />
@@ -126,8 +126,8 @@ export default function HealthPage() {
               </span>
             )}
           </div>
-        </div>
-        <div className="card-warm p-4">
+        </button>
+        <button type="button" onClick={() => setActiveTab('visits')} aria-pressed={activeTab === 'visits'} className={cn('card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40', activeTab === 'visits' && 'border-primary/45 bg-primary/5')}>
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-destructive/8 flex items-center justify-center">
               <Stethoscope className="w-4 h-4 text-destructive" />
@@ -135,7 +135,7 @@ export default function HealthPage() {
             <span className="text-xs text-muted-foreground">就医记录</span>
           </div>
           <p className="text-xl sm:text-2xl font-bold text-foreground">{visitRecords.length}</p>
-        </div>
+        </button>
       </div>
 
       {/* Tabs */}

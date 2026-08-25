@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -120,10 +120,11 @@ export default function ProcurementPage() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState<{ order: Order; mode: 'consume' | 'restore' } | null>(null);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
+  const ordersSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const requestedFilter = new URLSearchParams(window.location.search).get('filter');
-    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'pending', 'shipped', 'delivered', 'durable', 'finished', 'cancelled'].includes(requestedFilter)) {
+    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'in-progress', 'pending', 'shipped', 'delivered', 'durable', 'finished', 'cancelled'].includes(requestedFilter)) {
       setStatusFilter(requestedFilter);
     }
   }, []);
@@ -165,7 +166,8 @@ export default function ProcurementPage() {
         if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
         if (statusFilter === 'expiring' && !(o.status === 'delivered' && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
         if (statusFilter === 'expired' && !(o.status === 'delivered' && expiry && expiry.daysLeft < 0)) return false;
-        if (!['all', 'low-stock', 'expiring', 'expired'].includes(statusFilter) && o.status !== statusFilter) return false;
+        if (statusFilter === 'in-progress' && !['pending', 'shipped'].includes(o.status)) return false;
+        if (!['all', 'low-stock', 'expiring', 'expired', 'in-progress'].includes(statusFilter) && o.status !== statusFilter) return false;
         if (categoryFilter !== 'all' && o.category !== categoryFilter) return false;
         if (search && !o.itemName.includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
         return true;
@@ -247,6 +249,13 @@ export default function ProcurementPage() {
     const pending = state.orders.filter(o => o.status === 'pending' || o.status === 'shipped').length;
     return { stockValue, lowStock, pending, count: state.orders.length };
   }, [state.orders, state.feedingRecords]);
+
+  const showOrderFilter = (filter: string) => {
+    setStatusFilter(filter);
+    setCategoryFilter('all');
+    setSearch('');
+    window.requestAnimationFrame(() => ordersSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   return (
     <div className="space-y-6 fade-in">
@@ -380,14 +389,14 @@ export default function ProcurementPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCard label="当前库存价值" value={`¥${summary.stockValue.toLocaleString()}`} />
-        <SummaryCard label="物资批次" value={`${summary.count} 批`} />
-        <SummaryCard label="需要补货" value={`${summary.lowStock} 项`} accent={summary.lowStock ? 'text-[#D4915E]' : 'text-primary-foreground'} />
-        <SummaryCard label="进行中" value={`${summary.pending} 单`} accent="text-accent" />
+        <SummaryCard label="当前库存价值" value={`¥${summary.stockValue.toLocaleString()}`} active={statusFilter === 'all'} onClick={() => showOrderFilter('all')} />
+        <SummaryCard label="物资批次" value={`${summary.count} 批`} active={statusFilter === 'all'} onClick={() => showOrderFilter('all')} />
+        <SummaryCard label="需要补货" value={`${summary.lowStock} 项`} accent={summary.lowStock ? 'text-[#D4915E]' : 'text-primary-foreground'} active={statusFilter === 'low-stock'} onClick={() => showOrderFilter('low-stock')} />
+        <SummaryCard label="进行中" value={`${summary.pending} 单`} accent="text-accent" active={statusFilter === 'in-progress'} onClick={() => showOrderFilter('in-progress')} />
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div ref={ordersSectionRef} className="flex scroll-mt-4 items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -416,6 +425,7 @@ export default function ProcurementPage() {
             <SelectItem value="low-stock">需要补货</SelectItem>
             <SelectItem value="expiring">7 天内到期</SelectItem>
             <SelectItem value="expired">已过期</SelectItem>
+            <SelectItem value="in-progress">进行中</SelectItem>
             <SelectItem value="pending">待发货</SelectItem>
             <SelectItem value="shipped">运输中</SelectItem>
             <SelectItem value="delivered">已到货</SelectItem>
@@ -474,6 +484,9 @@ export default function ProcurementPage() {
                 const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
+                const depletion = getDepletionInfo(order, state.feedingRecords);
+                const needsRestock = order.status === 'delivered' && !order.repurchasedAt
+                  && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
                 const orderIndex = state.orders.findIndex(item => item.id === order.id);
                 const priceHistory = getPriceHistory(
                   order.itemName,
@@ -532,10 +545,7 @@ export default function ProcurementPage() {
                       ) : '-'}
                     </td>
                     <td className="px-4 py-3">
-                      {(() => {
-                        const depletion = getDepletionInfo(order, state.feedingRecords);
-                        if (!depletion) return <span className="text-muted-foreground text-xs">-</span>;
-                        return (
+                      {depletion ? (
                           <div className="flex items-center gap-1">
                             <TrendingDown className="w-3 h-3 text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">{depletion.depletionDate}</span>
@@ -545,8 +555,7 @@ export default function ProcurementPage() {
                               </Badge>
                             )}
                           </div>
-                        );
-                      })()}
+                        ) : <span className="text-muted-foreground text-xs">-</span>}
                     </td>
                     <td className="px-4 py-3">
                       <Select value={order.status} onValueChange={status => updateOrderStatus(order.id, status as Order['status'])}>
@@ -576,6 +585,11 @@ export default function ProcurementPage() {
                             <SelectItem value="restore" disabled={order.consumed <= 0}>退回</SelectItem>
                           </SelectContent>
                         </Select>
+                        {needsRestock && (
+                          <Button variant="outline" size="sm" onClick={() => setRepurchaseOrder(order)} className="h-8 text-xs">
+                            <ShoppingCart className="h-3.5 w-3.5" />已回购
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon-sm" onClick={() => setEditingOrder(order)} title="编辑采购记录" aria-label={`编辑${order.itemName}`}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -674,12 +688,26 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
   );
 }
 
-function SummaryCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function SummaryCard({ label, value, accent, active, onClick }: {
+  label: string;
+  value: string;
+  accent?: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="card-warm p-4">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        active && 'border-primary/45 bg-primary/5'
+      )}
+    >
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className={cn('text-xl font-bold', accent || 'text-foreground')}>{value}</p>
-    </div>
+    </button>
   );
 }
 

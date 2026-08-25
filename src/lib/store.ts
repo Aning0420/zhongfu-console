@@ -103,6 +103,30 @@ function normalizeStockProductName(value: string): string {
   );
 }
 
+const PRODUCT_KINDS = [
+  '主食冻干', '零食冻干', '主食罐头', '零食罐头', '主食餐包', '零食餐包',
+  '处方粮', '幼猫粮', '成猫粮', '羊奶粉', '乳铁蛋白', '益生菌', '猫条',
+  '冻干', '罐头', '餐包', '汤包', '奶粉', '猫粮',
+] as const;
+
+function stockProductKind(value: string): string {
+  const normalized = normalizeStockProductName(value);
+  return PRODUCT_KINDS.find(kind => normalized.includes(kind)) || '';
+}
+
+function hasDistinctiveOverlap(left: string, right: string, kind: string): boolean {
+  const a = left.replace(kind, '');
+  const b = right.replace(kind, '');
+  if (!a || !b) return false;
+  if ((a.includes(b) && b.length >= 2) || (b.includes(a) && a.length >= 2)) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  for (let index = 0; index < shorter.length - 1; index += 1) {
+    if (longer.includes(shorter.slice(index, index + 2))) return true;
+  }
+  return false;
+}
+
 function parseAmount(value?: string): ParsedAmount | null {
   const match = value?.match(AMOUNT_PATTERN);
   if (!match) return null;
@@ -139,26 +163,54 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
 
   const source = `${record.foodName} ${record.amount}`;
   const normalizedSource = normalizeStockProductName(record.foodName);
-  const groups = new Map<string, { name: string; orders: Order[]; position: number }>();
+  const eligibleOrders = orders.filter(order =>
+    ['delivered', 'shipped', 'pending'].includes(order.status)
+    && order.quantity - order.consumed > 0
+  );
+  const identitiesByKind = new Map<string, Set<string>>();
+  eligibleOrders.forEach(order => {
+    const kind = stockProductKind(order.itemName);
+    if (!kind) return;
+    const identities = identitiesByKind.get(kind) || new Set<string>();
+    identities.add(normalizeStockProductName(order.itemName));
+    identitiesByKind.set(kind, identities);
+  });
+  const groups = new Map<string, { name: string; orders: Order[]; position: number; matchToken: string }>();
 
-  orders.forEach(order => {
-    if (order.status !== 'delivered' || order.quantity - order.consumed <= 0) return;
+  eligibleOrders.forEach(order => {
     const key = normalizeStockProductName(order.itemName);
-    // A generic label such as "猫粮" must not guess between multiple branded products.
-    if (!key || !normalizedSource.includes(key)) return;
+    const kind = stockProductKind(order.itemName);
+    const exactMatch = Boolean(key && normalizedSource.includes(key));
+    const kindMatch = Boolean(kind && normalizedSource.includes(kind));
+    const distinctiveMatch = kindMatch && hasDistinctiveOverlap(key, normalizedSource, kind);
+    const uniqueKindMatch = kindMatch && identitiesByKind.get(kind)?.size === 1;
+    // Generic names only match when there is one unambiguous stocked product of that kind.
+    if (!exactMatch && !distinctiveMatch && !uniqueKindMatch) return;
     const current = groups.get(key);
-    const position = normalizedSource.indexOf(key);
+    const matchToken = exactMatch ? key : kind;
+    const position = normalizedSource.indexOf(matchToken);
     if (current) current.orders.push(order);
-    else groups.set(key, { name: order.itemName, orders: [order], position: position < 0 ? Number.MAX_SAFE_INTEGER : position });
+    else groups.set(key, {
+      name: order.itemName,
+      orders: [order],
+      position: position < 0 ? Number.MAX_SAFE_INTEGER : position,
+      matchToken,
+    });
   });
 
   const usages = Array.from(groups.values())
     .sort((a, b) => a.position - b.position || b.name.length - a.name.length)
     .map((group, index, allGroups) => {
       const displayName = group.name.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '').trim();
-      const literalIndex = source.toLocaleLowerCase('zh-CN').indexOf(displayName.toLocaleLowerCase('zh-CN'));
+      const sourceLower = source.toLocaleLowerCase('zh-CN');
+      const literalName = displayName.toLocaleLowerCase('zh-CN');
+      const literalIndex = sourceLower.indexOf(literalName);
+      const tokenIndex = literalIndex >= 0 ? literalIndex : sourceLower.indexOf(group.matchToken);
+      const tokenLength = literalIndex >= 0 ? displayName.length : group.matchToken.length;
       const nearby = literalIndex >= 0
-        ? source.slice(literalIndex + displayName.length, literalIndex + displayName.length + 36).split(/[；;｜|\n]/)[0]
+        ? source.slice(tokenIndex + tokenLength, tokenIndex + tokenLength + 36).split(/[；;｜|\n]/)[0]
+        : tokenIndex >= 0
+          ? source.slice(tokenIndex + tokenLength, tokenIndex + tokenLength + 36).split(/[；;｜|\n]/)[0]
         : '';
       const amount = parseAmount(nearby) || (allGroups.length === 1 || index === 0 ? parseAmount(record.amount) : null);
       return amount ? { group, amount } : null;
@@ -180,7 +232,12 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
     let amountLeft = amount.value;
     group.orders
       .slice()
-      .sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || a.id.localeCompare(b.id))
+      .sort((a, b) => {
+        const priority = { delivered: 0, shipped: 1, pending: 2 } as const;
+        return priority[a.status as keyof typeof priority] - priority[b.status as keyof typeof priority]
+          || a.purchaseDate.localeCompare(b.purchaseDate)
+          || a.id.localeCompare(b.id);
+      })
       .forEach(order => {
         if (amountLeft <= 0) return;
         const requestedInOrderUnit = convertInventoryAmount(amountLeft, amount.unit, order.unit);
@@ -203,7 +260,11 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
   return {
     orders: orders.map(order => {
       const amount = consumedByOrder.get(order.id);
-      return amount ? { ...order, consumed: roundInventory(Math.min(order.quantity, order.consumed + amount)) } : order;
+      return amount ? {
+        ...order,
+        status: order.status === 'pending' || order.status === 'shipped' ? 'delivered' as const : order.status,
+        consumed: roundInventory(Math.min(order.quantity, order.consumed + amount)),
+      } : order;
     }),
     deductions,
   };

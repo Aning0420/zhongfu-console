@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Wallet, Plus, TrendingUp, TrendingDown, PieChart, Trash2, Search, Pencil } from 'lucide-react';
+import { Wallet, Plus, TrendingUp, TrendingDown, PieChart as PieChartIcon, Trash2, Search, Pencil } from 'lucide-react';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
 import type { Expense } from '@/lib/store';
 
@@ -21,7 +22,14 @@ const categoryColors: Record<string, string> = {
   '体检': '#87CEEB',
   '疫苗': '#98D8C8',
   '驱虫': '#D4C5A0',
+  '奶': '#7CC6A6',
+  '猫粮': '#6EA8D9',
+  '喂养用品': '#D49AC2',
+  '洗护用品': '#F0A36E',
+  '主食罐头': '#91B85B',
+  '主食冻干': '#D77A61',
 };
+const categoryPalette = ['#6EA8D9', '#F39AAE', '#7CC6A6', '#E7B04B', '#A58BD4', '#F08080', '#5FB7B7', '#D49AC2', '#8A9A5B'];
 
 export default function ExpensesPage() {
   const { state, addExpense, updateExpense, deleteExpense } = useAppContext();
@@ -30,30 +38,39 @@ export default function ExpensesPage() {
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const breakdownRef = useRef<HTMLDivElement>(null);
 
   const availableCategories = useMemo(() =>
     Array.from(new Set(state.expenses.map(expense => expense.category))).sort((a, b) => a.localeCompare(b, 'zh-CN')),
     [state.expenses]
   );
+  const categoryColorMap = useMemo(() => Object.fromEntries(
+    availableCategories.map((category, index) => [category, categoryColors[category] || categoryPalette[index % categoryPalette.length]])
+  ), [availableCategories]);
+
+  const monthExpenses = useMemo(() =>
+    state.expenses.filter(expense => expense.date.startsWith(filterMonth)),
+    [state.expenses, filterMonth]
+  );
 
   const filteredExpenses = useMemo(() =>
-    state.expenses
-      .filter(e => e.date.startsWith(filterMonth))
+    monthExpenses
       .filter(e => categoryFilter === 'all' || e.category === categoryFilter)
       .filter(e => !search.trim() || e.description.toLowerCase().includes(search.trim().toLowerCase()) || e.category.includes(search.trim()))
       .sort((a, b) => b.date.localeCompare(a.date)),
-    [state.expenses, filterMonth, categoryFilter, search]
+    [monthExpenses, categoryFilter, search]
   );
 
   const stats = useMemo(() => {
-    const total = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+    const total = monthExpenses.reduce((s, e) => s + e.amount, 0);
     const byCategory: Record<string, number> = {};
-    filteredExpenses.forEach(e => {
+    monthExpenses.forEach(e => {
       byCategory[e.category] = (byCategory[e.category] || 0) + e.amount;
     });
     const sorted = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
-    return { total, byCategory: sorted, count: filteredExpenses.length };
-  }, [filteredExpenses]);
+    return { total, byCategory: sorted, count: monthExpenses.length };
+  }, [monthExpenses]);
 
   // Compare with previous month
   const prevMonthStats = useMemo(() => {
@@ -64,6 +81,14 @@ export default function ExpensesPage() {
   }, [state.expenses, filterMonth]);
 
   const changePercent = prevMonthStats > 0 ? ((stats.total - prevMonthStats) / prevMonthStats * 100).toFixed(0) : null;
+  const showDetails = () => {
+    setCategoryFilter('all');
+    setSearch('');
+    window.requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const showBreakdown = () => {
+    window.requestAnimationFrame(() => breakdownRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   return (
     <div className="space-y-6 fade-in">
@@ -84,7 +109,7 @@ export default function ExpensesPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card-warm p-4">
+        <button type="button" onClick={showDetails} className="card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-[#87CEEB]/8 flex items-center justify-center">
               <Wallet className="w-4 h-4 text-[#87CEEB]" />
@@ -104,18 +129,18 @@ export default function ExpensesPage() {
               </span>
             </div>
           )}
-        </div>
-        <div className="card-warm p-4">
+        </button>
+        <button type="button" onClick={showDetails} className="card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-primary/8 flex items-center justify-center">
-              <PieChart className="w-4 h-4 text-primary" />
+              <PieChartIcon className="w-4 h-4 text-primary" />
             </div>
             <span className="text-xs text-muted-foreground">消费笔数</span>
           </div>
           <p className="text-2xl font-bold text-foreground">{stats.count}</p>
           <p className="text-xs text-muted-foreground mt-1">笔交易记录</p>
-        </div>
-        <div className="card-warm p-4">
+        </button>
+        <button type="button" onClick={showBreakdown} className="card-warm p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-xs text-muted-foreground">日均消费</span>
           </div>
@@ -123,12 +148,12 @@ export default function ExpensesPage() {
             ¥{stats.total > 0 ? Math.round(stats.total / new Date().getDate()) : 0}
           </p>
           <p className="text-xs text-muted-foreground mt-1">本月日均</p>
-        </div>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Expense List */}
-        <div className="lg:col-span-2 space-y-4">
+        <div ref={detailsRef} className="scroll-mt-4 lg:col-span-2 space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-base font-semibold text-foreground">支出明细</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -157,7 +182,7 @@ export default function ExpensesPage() {
                 <div className="flex min-w-0 items-center gap-3">
                   <div
                     className="w-2 h-8 rounded-full"
-                    style={{ backgroundColor: categoryColors[expense.category] || '#8A8A8A' }}
+                    style={{ backgroundColor: categoryColorMap[expense.category] || '#8A8A8A' }}
                   />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{expense.description}</p>
@@ -193,16 +218,45 @@ export default function ExpensesPage() {
         </div>
 
         {/* Category Breakdown */}
-        <div className="card-warm p-5">
+        <div ref={breakdownRef} className="card-warm scroll-mt-4 p-5">
           <h2 className="text-base font-semibold text-foreground mb-4">分类占比</h2>
+          {stats.byCategory.length > 0 && (
+            <div className="relative mx-auto mb-5 h-56 w-full max-w-[320px]" aria-label="本月支出分类饼图">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={stats.byCategory.map(([name, value]) => ({ name, value }))}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={54}
+                    outerRadius={86}
+                    paddingAngle={2}
+                    stroke="transparent"
+                  >
+                    {stats.byCategory.map(([category], index) => (
+                      <Cell key={category} fill={categoryColorMap[category] || categoryPalette[index % categoryPalette.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={value => [`¥${Number(value).toLocaleString()}`, '支出']} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-xs text-muted-foreground">本月合计</span>
+                <span className="mt-1 text-lg font-bold text-foreground">¥{stats.total.toLocaleString()}</span>
+              </div>
+            </div>
+          )}
           <div className="space-y-3">
-            {stats.byCategory.map(([cat, amount]) => {
+            {stats.byCategory.map(([cat, amount], index) => {
               const pct = stats.total > 0 ? (amount / stats.total * 100).toFixed(0) : '0';
+              const color = categoryColorMap[cat] || categoryPalette[index % categoryPalette.length];
               return (
-                <div key={cat}>
+                <button key={cat} type="button" onClick={() => setCategoryFilter(cat)} className={cn('w-full rounded-md px-1 py-1 text-left transition-colors hover:bg-muted/50', categoryFilter === cat && 'bg-primary/8')}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: categoryColors[cat] || '#8A8A8A' }} />
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
                       <span className="text-sm text-foreground">{cat}</span>
                     </div>
                     <div className="text-right">
@@ -213,10 +267,10 @@ export default function ExpensesPage() {
                   <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: categoryColors[cat] || '#8A8A8A' }}
+                      style={{ width: `${pct}%`, backgroundColor: color }}
                     />
                   </div>
-                </div>
+                </button>
               );
             })}
             {stats.byCategory.length === 0 && (
