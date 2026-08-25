@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
-import { calcDailyUsage } from '@/lib/store';
+import { calcDailyUsage, getPriceHistory, orderTotalPrice } from '@/lib/store';
 import { Plus, Search, Package, PackageMinus, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
@@ -246,7 +246,7 @@ export default function ProcurementPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 新建采购
             </Button>
           </DialogTrigger>
-          <AddOrderDialog onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />
+          <AddOrderDialog orders={state.orders} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />
         </Dialog>
       </div>
 
@@ -454,6 +454,13 @@ export default function ProcurementPage() {
                 const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
+                const orderIndex = state.orders.findIndex(item => item.id === order.id);
+                const priceHistory = getPriceHistory(
+                  order.itemName,
+                  order.unit,
+                  order.unitPrice,
+                  orderIndex > 0 ? state.orders.slice(0, orderIndex) : [],
+                );
                 return (
                   <tr key={order.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
@@ -483,7 +490,11 @@ export default function ProcurementPage() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-foreground">¥{order.unitPrice}</td>
+                    <td className="px-4 py-3 text-foreground">
+                      <div className="whitespace-nowrap font-medium">¥{order.unitPrice.toFixed(2)}/{order.unit}</div>
+                      <div className="whitespace-nowrap text-xs text-muted-foreground">本次共 ¥{orderTotalPrice(order).toFixed(2)}</div>
+                      {priceHistory && <PriceChangeLabel history={priceHistory} />}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{order.supplier}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.purchaseDate}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.productionDate || '-'}</td>
@@ -613,22 +624,39 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
   );
 }
 
-function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
+function PriceChangeLabel({ history }: { history: NonNullable<ReturnType<typeof getPriceHistory>> }) {
+  const nearlyEqual = Math.abs(history.changePercent) < 0.01;
+  if (history.isHistoricalLow) return <div className="mt-0.5 whitespace-nowrap text-xs text-[#3F8A61]">历史低价</div>;
+  if (nearlyEqual) return <div className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">与上次持平</div>;
+  const lower = history.changePercent < 0;
+  return (
+    <div className={cn('mt-0.5 whitespace-nowrap text-xs', lower ? 'text-[#3F8A61]' : 'text-[#C56C5C]')}>
+      比上次{lower ? '低' : '高'} {Math.abs(history.changePercent).toFixed(1)}%
+    </div>
+  );
+}
+
+function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [form, setForm] = useState({
-    itemName: '', category: '猫粮', quantity: '', unit: 'kg', unitPrice: '', supplier: '',
+    itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', syncExpense: true,
     purchaseDate: new Date().toISOString().split('T')[0],
   });
 
+  const quantity = Number(form.quantity);
+  const totalPrice = Number(form.totalPrice);
+  const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
+  const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, orders);
+
   const handleSubmit = () => {
-    if (!form.itemName || !form.quantity || !form.unitPrice) return;
-    const totalAmount = Number(form.quantity) * Number(form.unitPrice);
+    if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0) return;
     onAdd({
-      itemName: form.itemName,
+      itemName: form.itemName.trim(),
       category: form.category,
-      quantity: Number(form.quantity),
-      unit: form.unit,
-      unitPrice: Number(form.unitPrice),
+      quantity,
+      unit: form.unit.trim() || '件',
+      unitPrice,
+      totalPrice,
       purchaseDate: form.purchaseDate,
       status: 'pending',
       consumed: 0,
@@ -636,11 +664,11 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
       productionDate: form.productionDate || undefined,
       shelfLife: form.shelfLife ? (form.shelfLifeUnit === 'year' ? Number(form.shelfLife) * 365 : form.shelfLifeUnit === 'month' ? Number(form.shelfLife) * 30 : Number(form.shelfLife)) : undefined,
     });
-    if (form.syncExpense && totalAmount > 0) {
+    if (form.syncExpense && totalPrice > 0) {
       addExpense({
         date: form.purchaseDate || new Date().toISOString().split('T')[0],
         category: form.category,
-        amount: totalAmount,
+        amount: totalPrice,
         description: `采购${form.itemName}`,
         relatedModule: 'procurement',
       });
@@ -685,10 +713,24 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
             <Input value={form.unit} onChange={e => setForm(p => ({ ...p, unit: e.target.value }))} placeholder="kg/包/袋" />
           </div>
           <div className="space-y-1.5">
-            <Label>单价(¥)</Label>
-            <Input type="number" value={form.unitPrice} onChange={e => setForm(p => ({ ...p, unitPrice: e.target.value }))} placeholder="0" />
+            <Label>本次总价(¥)</Label>
+            <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={e => setForm(p => ({ ...p, totalPrice: e.target.value }))} placeholder="实付金额" />
           </div>
         </div>
+        {unitPrice > 0 && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
+            <div className="font-medium text-foreground">自动换算：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
+            {priceHistory ? (
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                <span>上次 ¥{priceHistory.lastUnitPrice.toFixed(2)}/{form.unit}</span>
+                <span>历史最低 ¥{priceHistory.lowestUnitPrice.toFixed(2)}/{form.unit}</span>
+                <PriceChangeLabel history={priceHistory} />
+              </div>
+            ) : (
+              <div className="mt-1 text-muted-foreground">暂无同名同单位的历史价格</div>
+            )}
+          </div>
+        )}
         {!['猫砂与清洁', '喂养用品', '洗护用品', '玩具', '居家用品', '外出用品', '其他用品'].includes(form.category) && (
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -718,7 +760,7 @@ function AddOrderDialog({ onClose, onAdd, addExpense }: { onClose: () => void; o
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5">
           <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={v => setForm(p => ({ ...p, syncExpense: !!v }))} />
           <label htmlFor="sync-expense" className="text-sm text-muted-foreground cursor-pointer select-none">
-            同步记录购物支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number(form.quantity || 0) * Number(form.unitPrice || 0)).toFixed(2)}）
+            同步记录购物支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number.isFinite(totalPrice) ? totalPrice : 0).toFixed(2)}）
           </label>
         </div>
         <div className="flex justify-end gap-2 pt-2">

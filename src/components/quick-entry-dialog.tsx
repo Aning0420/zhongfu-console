@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { DailyObservation, FeedingRecord } from '@/lib/store';
+import { getPriceHistory, type DailyObservation, type FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 
 type EntryType = 'feeding' | 'observation' | 'weight' | 'expense' | 'purchase';
@@ -32,7 +32,11 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [observationNote, setObservationNote] = useState('');
   const [weight, setWeight] = useState({ value: '', note: '' });
   const [expense, setExpense] = useState({ category: '主粮', amount: '', description: '' });
-  const [purchase, setPurchase] = useState({ itemName: '', category: '猫粮', quantity: '1', unit: '件', unitPrice: '', supplier: '', syncExpense: true });
+  const [purchase, setPurchase] = useState({ itemName: '', category: '猫粮', quantity: '1', unit: '件', totalPrice: '', supplier: '', syncExpense: true });
+  const purchaseQuantity = Number(purchase.quantity);
+  const purchaseTotalPrice = Number(purchase.totalPrice);
+  const purchaseUnitPrice = purchaseQuantity > 0 && purchaseTotalPrice >= 0 ? purchaseTotalPrice / purchaseQuantity : 0;
+  const purchasePriceHistory = getPriceHistory(purchase.itemName, purchase.unit, purchaseUnitPrice, state.orders);
 
   const close = () => onOpenChange(false);
 
@@ -93,32 +97,32 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   const submitPurchase = () => {
     const quantity = Number(purchase.quantity);
-    const unitPrice = Number(purchase.unitPrice);
-    if (!purchase.itemName.trim() || !Number.isFinite(quantity) || quantity <= 0) return;
+    if (!purchase.itemName.trim() || !purchase.totalPrice || !Number.isFinite(quantity) || quantity <= 0) return;
 
     addOrder({
       itemName: purchase.itemName.trim(),
       category: purchase.category,
       quantity,
       unit: purchase.unit.trim() || '件',
-      unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+      unitPrice: Number.isFinite(purchaseUnitPrice) ? purchaseUnitPrice : 0,
+      totalPrice: Number.isFinite(purchaseTotalPrice) ? purchaseTotalPrice : 0,
       purchaseDate: today,
       status: 'delivered',
       consumed: 0,
       supplier: purchase.supplier.trim() || '未填写',
     });
 
-    if (purchase.syncExpense && unitPrice > 0) {
+    if (purchase.syncExpense && purchaseTotalPrice > 0) {
       addExpense({
         date: today,
         category: purchase.category,
-        amount: quantity * unitPrice,
+        amount: purchaseTotalPrice,
         description: `${purchase.itemName.trim()} ${quantity}${purchase.unit.trim() || '件'}`,
         relatedModule: 'procurement',
       });
     }
 
-    setPurchase(prev => ({ ...prev, itemName: '', quantity: '1', unitPrice: '', supplier: '' }));
+    setPurchase(prev => ({ ...prev, itemName: '', quantity: '1', totalPrice: '', supplier: '' }));
     close();
   };
 
@@ -217,12 +221,18 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
             <div className="grid grid-cols-3 gap-3">
               <Field label="数量"><Input type="number" min="0" step="0.01" value={purchase.quantity} onChange={event => setPurchase(prev => ({ ...prev, quantity: event.target.value }))} /></Field>
               <Field label="单位"><Input value={purchase.unit} onChange={event => setPurchase(prev => ({ ...prev, unit: event.target.value }))} placeholder="袋/罐/kg" /></Field>
-              <Field label="单价"><Input type="number" min="0" step="0.01" value={purchase.unitPrice} onChange={event => setPurchase(prev => ({ ...prev, unitPrice: event.target.value }))} placeholder="0.00" /></Field>
+              <Field label="本次总价"><Input type="number" min="0" step="0.01" value={purchase.totalPrice} onChange={event => setPurchase(prev => ({ ...prev, totalPrice: event.target.value }))} placeholder="实付金额" /></Field>
             </div>
+            {purchaseUnitPrice > 0 && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                自动换算 ¥{purchaseUnitPrice.toFixed(2)}/{purchase.unit.trim() || '单位'}
+                {purchasePriceHistory && `；上次 ¥${purchasePriceHistory.lastUnitPrice.toFixed(2)}，历史最低 ¥${purchasePriceHistory.lowestUnitPrice.toFixed(2)}`}
+              </div>
+            )}
             <Field label="购买渠道"><Input value={purchase.supplier} onChange={event => setPurchase(prev => ({ ...prev, supplier: event.target.value }))} placeholder="店铺或平台，可选" /></Field>
             <label className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">
               <Checkbox checked={purchase.syncExpense} onCheckedChange={checked => setPurchase(prev => ({ ...prev, syncExpense: checked === true }))} />
-              同步生成 ¥{(Number(purchase.quantity || 0) * Number(purchase.unitPrice || 0)).toFixed(2)} 支出
+              同步生成 ¥{(Number.isFinite(purchaseTotalPrice) ? purchaseTotalPrice : 0).toFixed(2)} 支出
             </label>
             <SubmitRow onCancel={close} onSubmit={submitPurchase} label="确认入库" />
           </TabsContent>

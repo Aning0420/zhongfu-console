@@ -142,17 +142,31 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     switch (syncData.type) {
       case 'procurement': {
         const d = syncData.data;
+        const quantity = Number(d.quantity) || 1;
+        const totalPrice = d.total_price === undefined || d.total_price === null
+          ? (Number(d.price) || 0) * quantity
+          : Number(d.total_price) || 0;
         addOrder({
           itemName: String(d.item_name || '未知物品'),
           category: normalizeInventoryCategory(d.category),
-          quantity: Number(d.quantity) || 1,
+          quantity,
           unit: String(d.unit || '个'),
-          unitPrice: Number(d.price) || 0,
+          unitPrice: totalPrice / quantity,
+          totalPrice,
           supplier: String(d.supplier || '线上'),
           purchaseDate: today,
           status: 'delivered',
           consumed: 0,
         });
+        if (totalPrice > 0) {
+          addExpense({
+            category: normalizeInventoryCategory(d.category),
+            amount: totalPrice,
+            description: `采购${String(d.item_name || '未知物品')}`,
+            date: today,
+            relatedModule: 'procurement',
+          });
+        }
         break;
       }
       case 'expense': {

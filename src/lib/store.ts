@@ -5,6 +5,8 @@ export interface Order {
   quantity: number;
   unit: string;
   unitPrice: number;
+  /** Amount actually paid for this purchase. Older records only have unitPrice. */
+  totalPrice?: number;
   purchaseDate: string;
   status: 'pending' | 'shipped' | 'delivered' | 'cancelled';
   consumed: number;
@@ -12,6 +14,55 @@ export interface Order {
   productionDate?: string;
   shelfLife?: number; // days
   dailyUsage?: number; // average daily consumption
+}
+
+export interface PriceHistory {
+  lastUnitPrice: number;
+  lowestUnitPrice: number;
+  changePercent: number;
+  isHistoricalLow: boolean;
+}
+
+export function orderTotalPrice(order: Order): number {
+  if (Number.isFinite(order.totalPrice) && (order.totalPrice ?? 0) >= 0) {
+    return order.totalPrice ?? 0;
+  }
+  return order.quantity * order.unitPrice;
+}
+
+function normalizeProductIdentity(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase('zh-CN')
+    .replace(/[\s\-_/·.,，。()（）]+/g, '');
+}
+
+export function getPriceHistory(
+  itemName: string,
+  unit: string,
+  currentUnitPrice: number,
+  orders: Order[],
+): PriceHistory | null {
+  if (!itemName.trim() || !unit.trim() || !Number.isFinite(currentUnitPrice) || currentUnitPrice <= 0) return null;
+
+  const normalizedName = normalizeProductIdentity(itemName);
+  const normalizedUnit = normalizeProductIdentity(unit);
+  const matches = orders.filter(order =>
+    order.status !== 'cancelled'
+    && order.unitPrice > 0
+    && normalizeProductIdentity(order.itemName) === normalizedName
+    && normalizeProductIdentity(order.unit) === normalizedUnit
+  );
+  if (matches.length === 0) return null;
+
+  const lastUnitPrice = matches[matches.length - 1].unitPrice;
+  const lowestUnitPrice = Math.min(...matches.map(order => order.unitPrice));
+  return {
+    lastUnitPrice,
+    lowestUnitPrice,
+    changePercent: ((currentUnitPrice - lastUnitPrice) / lastUnitPrice) * 100,
+    isHistoricalLow: currentUnitPrice <= lowestUnitPrice * (1 + 0.0001),
+  };
 }
 
 export interface FeedingRecord {

@@ -34,7 +34,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 ---SYNC_DATA_END---
 
 可用数据类型和字段：
-- procurement: item_name, category, quantity, unit, price, supplier
+- procurement: item_name, category, quantity, unit, total_price(本次实付总价), supplier
 - expense: category, amount, description, note
 - feeding: meal_type(breakfast/lunch/dinner/snack), food_name, amount, remaining_amount(可选), note
 - feeding_plan: name, active, stages；stage 包含 name,start_date,end_date,description,meals,supplements；meal 包含 time,food,note
@@ -54,6 +54,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 - 用户提供医生制定的用药或恢复计划时应忠实保留，不擅自改变剂量或疗程；可以提示风险，但不要覆盖原计划。
 - 日期使用 YYYY-MM-DD。住院持续多天时，提取开始和结束日期。
 - 采购分类只能选择：${CATEGORIES.join('、')}。
+- 采购中的 total_price 是整次购买的实付总额，不是单价；例如“1.8kg共109元”应提取 quantity=1.8、unit=kg、total_price=109。采购会由应用自动同步支出，不要再额外生成 expense。
 - 不确定主食或零食时先追问，不要只凭包装形态判断。
 - 医疗问题给出谨慎建议，并在紧急症状时提示尽快联系兽医。`;
 

@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `你是"钟福管理中控台"的智能助手，负责帮�
 
 ### 采购录入
 ---SYNC_DATA_START---
-{"type":"procurement","data":{"item_name":"物品名","category":"物品细分类","quantity":数量,"unit":"单位","price":单价,"supplier":"供应商"}}
+{"type":"procurement","data":{"item_name":"物品名","category":"物品细分类","quantity":数量,"unit":"单位","total_price":本次实付总价,"supplier":"供应商"}}
 ---SYNC_DATA_END---
 
 ### 支出录入
@@ -64,8 +64,9 @@ const SYSTEM_PROMPT = `你是"钟福管理中控台"的智能助手，负责帮�
 ---SYNC_DATA_END---
 
 ## 规则
-- 如果用户说了购买相关的话（买了/下单/入手/花了），同时生成采购和支出两条同步数据
-- 如果信息不完整（如没提价格），用合理默认值（价格设为0）
+- 采购中的 total_price 是整次购买的实付总额，不是单价；例如“1.8kg共109元”应提取 quantity=1.8、unit=kg、total_price=109
+- 采购会由应用自动同步支出，不要再额外生成一条支出数据
+- 如果信息不完整（如没提总价），用合理默认值（总价设为0）
 - 回复要友好自然，告知用户已录入什么数据
 - 如果用户只是闲聊或查询，不需要输出同步数据
 - 如果用户发了图片，仔细识别图片内容（物品、文字、数字等），并据此录入数据
