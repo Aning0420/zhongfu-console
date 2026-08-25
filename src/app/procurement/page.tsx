@@ -857,18 +857,95 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 }
 
 function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
+  const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
     itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', syncExpense: true,
     purchaseDate: new Date().toISOString().split('T')[0],
   });
+  const [bundleItems, setBundleItems] = useState([
+    { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '' },
+    { id: 'bundle_2', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '' },
+  ]);
 
   const quantity = Number(form.quantity);
   const totalPrice = Number(form.totalPrice);
   const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
   const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, orders);
+  const bundleAllocated = bundleItems.reduce((sum, item) => sum + (Number(item.allocatedPrice) || 0), 0);
+  const bundleRemaining = Number.isFinite(totalPrice) ? totalPrice - bundleAllocated : 0;
+  const bundleItemsValid = bundleItems.length > 0 && bundleItems.every(item => {
+    const itemQuantity = Number(item.quantity);
+    const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
+    return Boolean(
+      item.itemName.trim()
+      && item.unit.trim()
+      && Number.isFinite(itemQuantity)
+      && itemQuantity > 0
+      && Number.isFinite(allocatedPrice)
+      && allocatedPrice >= 0
+    );
+  });
+  const bundleValid = Boolean(
+    form.purchaseDate
+    && form.totalPrice !== ''
+    && Number.isFinite(totalPrice)
+    && totalPrice >= 0
+    && bundleItemsValid
+    && bundleRemaining >= -0.005
+  );
+
+  const shelfLifeInDays = (value: string, unit: 'day' | 'month' | 'year' = 'day') => {
+    if (!value) return undefined;
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return undefined;
+    return unit === 'year' ? amount * 365 : unit === 'month' ? amount * 30 : amount;
+  };
 
   const handleSubmit = () => {
+    if (mode === 'bundle') {
+      if (!bundleValid) return;
+      bundleItems.forEach(item => {
+        const itemQuantity = Number(item.quantity);
+        const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
+        onAdd({
+          itemName: item.itemName.trim(),
+          category: item.category,
+          quantity: itemQuantity,
+          unit: item.unit.trim(),
+          unitPrice: allocatedPrice / itemQuantity,
+          totalPrice: allocatedPrice,
+          purchaseDate: form.purchaseDate,
+          status: 'pending',
+          consumed: 0,
+          supplier: form.supplier.trim(),
+          productionDate: item.productionDate || undefined,
+          shelfLife: shelfLifeInDays(item.shelfLife),
+        });
+      });
+      if (form.syncExpense && totalPrice > 0) {
+        const hasExactAllocation = Math.abs(bundleRemaining) < 0.005 && bundleItems.every(item => Number(item.allocatedPrice) > 0);
+        if (hasExactAllocation) {
+          bundleItems.forEach(item => addExpense({
+            date: form.purchaseDate,
+            category: item.category,
+            amount: Number(item.allocatedPrice),
+            description: `组合采购·${item.itemName.trim()}`,
+            relatedModule: 'procurement',
+          }));
+        } else {
+          addExpense({
+            date: form.purchaseDate,
+            category: '其他',
+            amount: totalPrice,
+            description: `组合采购：${bundleItems.map(item => item.itemName.trim()).join('、')}`,
+            relatedModule: 'procurement',
+          });
+        }
+      }
+      onClose();
+      return;
+    }
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0) return;
     onAdd({
       itemName: form.itemName.trim(),
@@ -882,7 +959,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       consumed: 0,
       supplier: form.supplier,
       productionDate: form.productionDate || undefined,
-      shelfLife: form.shelfLife ? (form.shelfLifeUnit === 'year' ? Number(form.shelfLife) * 365 : form.shelfLifeUnit === 'month' ? Number(form.shelfLife) * 30 : Number(form.shelfLife)) : undefined,
+      shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
     });
     if (form.syncExpense && totalPrice > 0) {
       addExpense({
@@ -897,11 +974,78 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   };
 
   return (
-    <DialogContent className="sm:max-w-[480px]">
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[680px]">
       <DialogHeader>
         <DialogTitle>新建采购订单</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
+        <div className="grid grid-cols-2 rounded-lg bg-muted/55 p-1" role="tablist" aria-label="采购录入方式">
+          <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'single' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>单品采购</button>
+          <button type="button" role="tab" aria-selected={mode === 'bundle'} onClick={() => setMode('bundle')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'bundle' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>组合采购</button>
+        </div>
+        {mode === 'bundle' ? (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label>采购日期</Label>
+                <Input type="date" value={form.purchaseDate} onChange={event => setForm(current => ({ ...current, purchaseDate: event.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>商家/直播间</Label>
+                <Input value={form.supplier} onChange={event => setForm(current => ({ ...current, supplier: event.target.value }))} placeholder="如：抖音某某直播间" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>整单实付(¥)</Label>
+                <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={event => setForm(current => ({ ...current, totalPrice: event.target.value }))} placeholder="如：199.90" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              {bundleItems.map((item, index) => (
+                <div key={item.id} className="rounded-lg border border-border/70 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">库存明细 {index + 1}</span>
+                    {bundleItems.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon-sm" onClick={() => setBundleItems(current => current.filter(entry => entry.id !== item.id))} className="text-destructive" title="删除明细">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.4fr)_130px_80px_80px_110px]">
+                    <Input value={item.itemName} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemName: event.target.value } : entry))} placeholder="商品名称/口味" />
+                    <Select value={item.category} onValueChange={category => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, category } : entry))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent><InventoryCategoryOptions /></SelectContent>
+                    </Select>
+                    <Input type="number" min="0" step="any" value={item.quantity} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, quantity: event.target.value } : entry))} placeholder="数量" />
+                    <Input value={item.unit} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, unit: event.target.value } : entry))} placeholder="单位" />
+                    <Input type="number" min="0" step="0.01" value={item.allocatedPrice} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, allocatedPrice: event.target.value } : entry))} placeholder="分摊金额(选填)" />
+                  </div>
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">生产日期（选填）</Label>
+                      <Input type="date" value={item.productionDate} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, productionDate: event.target.value } : entry))} aria-label={`明细 ${index + 1} 生产日期`} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">保质期天数（选填）</Label>
+                      <Input type="number" min="0" step="1" value={item.shelfLife} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLife: event.target.value } : entry))} placeholder="如：540" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '' }])} className="w-full">
+                <Plus className="h-3.5 w-3.5" />添加库存明细
+              </Button>
+            </div>
+            <div className="rounded-lg bg-primary/8 px-3 py-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">已分摊 ¥{bundleAllocated.toFixed(2)}</span>
+                <span className={cn('font-medium', bundleRemaining < -0.005 ? 'text-destructive' : 'text-foreground')}>未分摊 ¥{bundleRemaining.toFixed(2)}</span>
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">不知道单品价格可以不填分摊金额，库存仍会正常入库；系统只记录一笔整单支出，不会虚构单价。</p>
+            </div>
+          </>
+        ) : (
+          <>
         <div className="space-y-1.5">
           <Label>物资名称</Label>
           <Input value={form.itemName} onChange={e => setForm(p => ({ ...p, itemName: e.target.value }))} placeholder="如：皇家猫粮 K36" />
@@ -977,15 +1121,17 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         <div className="rounded-lg bg-primary/5 px-3 py-2.5">
           <p className="text-xs text-muted-foreground">💡 日均消耗量将根据喂食记录自动学习计算，无需手动填写。喂食记录越多，估算越准确。</p>
         </div>
+          </>
+        )}
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5">
           <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={v => setForm(p => ({ ...p, syncExpense: !!v }))} />
           <label htmlFor="sync-expense" className="text-sm text-muted-foreground cursor-pointer select-none">
-            同步记录购物支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number.isFinite(totalPrice) ? totalPrice : 0).toFixed(2)}）
+            同步记录{mode === 'bundle' ? '整单' : '购物'}支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number.isFinite(totalPrice) ? totalPrice : 0).toFixed(2)}）
           </label>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground">确认添加</Button>
+          <Button disabled={mode === 'bundle' && !bundleValid} onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground">{mode === 'bundle' ? `添加 ${bundleItems.length} 项库存` : '确认添加'}</Button>
         </div>
       </div>
     </DialogContent>

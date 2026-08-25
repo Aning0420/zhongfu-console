@@ -46,7 +46,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 规则：
 - 只在用户明确要记录、添加或修改数据时输出同步标记；普通咨询不要输出。
 - 饮食计划只提取用户实际提供的阶段、日期和餐次，绝对不要自行新增或推测阶段二、阶段三等内容。
-- feeding_plan 的 supplements 必须是普通字符串；meal 只使用 time、food、note，其中食物、克数和冲泡方式都可合并写入 food 或 note。
+- feeding_plan 的 meal.food 必须包含该餐全部会消耗库存的食物、奶粉和营养补充剂及用量；例如“澳龙处方粮10g＋麦德氏K41羊奶粉5g＋乳铁蛋白0.225g＋益生菌1g”。温水、泡粮、分碗、放置时间等不消耗库存的操作只能放入 meal.note。乳铁蛋白、益生菌等还要按使用餐次汇总到 stage.supplements，不能只写在 note。
 - 结构化数据必须是一个完整、紧凑、有效的 JSON 对象，不要在 JSON 中插入第二个数组或额外说明。
 - 信息足够时直接简短确认并输出同步数据；信息不足时只追问缺少的信息，不要同时输出同步数据。
 - 回答涉及“现在、今天、当前库存、当前计划、最近体重”等问题时，优先使用应用数据摘要，不要让用户重复提供已有记录。
@@ -93,12 +93,12 @@ const FEEDING_PLAN_SCHEMA = {
                     required: ['time', 'food', 'note'],
                     properties: {
                       time: { type: 'string' },
-                      food: { type: 'string' },
-                      note: { type: 'string' },
+                      food: { type: 'string', description: '该餐全部库存消耗项目及各自用量，不包含水和操作说明' },
+                      note: { type: 'string', description: '温水、冲泡、分碗、观察等不消耗库存的说明' },
                     },
                   },
                 },
-                supplements: { type: 'string' },
+                supplements: { type: 'string', description: '营养补充剂、用量和使用餐次的汇总' },
               },
             },
           },
@@ -141,11 +141,118 @@ function getText(result: unknown): string {
   throw new Error('AI 未返回可读取的内容');
 }
 
+const PLAN_CONSUMABLE_AMOUNT = /(?:\d+(?:\.\d+)?\s*(?:kg|公斤|千克|g|克|mg|毫克|ml|毫升|罐|袋|包|盒|支|条|片|粒|胶囊)|半\s*(?:罐|袋|包|盒|支|条|片|粒|胶囊))/i;
+const PLAN_NON_STOCK_LIQUID = /(温水|凉白开|清水|饮用水|纯净水)/;
+const PLAN_SUPPLEMENT = /(乳铁蛋白|益生菌|营养补充剂|补充剂)/;
+
+function planIdentity(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s＋+、，,；;|｜:：]/g, '');
+}
+
+function uniquePlanItems(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter(value => {
+    const key = planIdentity(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function extractPlanFragments(value: string): { consumables: string[]; notes: string[]; supplements: string[] } {
+  const consumables: string[] = [];
+  const notes: string[] = [];
+  const supplements: string[] = [];
+  value.split(/[＋+；;，,、]/).forEach(raw => {
+    const item = raw
+      .replace(/^\s*(?:(?:\d{1,2}:\d{2})|早餐|午餐|晚餐|早上|中午|晚上|每餐)?\s*/, '')
+      .replace(/^\s*(?:营养补充|补充剂|补充|添加)\s*[:：]?\s*/, '')
+      .trim();
+    if (!item) return;
+    if (PLAN_CONSUMABLE_AMOUNT.test(item) && !PLAN_NON_STOCK_LIQUID.test(item)) {
+      consumables.push(item);
+      if (PLAN_SUPPLEMENT.test(item)) supplements.push(item);
+      return;
+    }
+    notes.push(item);
+  });
+  return {
+    consumables: uniquePlanItems(consumables),
+    notes: uniquePlanItems(notes),
+    supplements: uniquePlanItems(supplements),
+  };
+}
+
+function appendPlanItems(current: string, additions: string[]): string {
+  return uniquePlanItems([current, ...additions].filter(Boolean)).join('＋');
+}
+
+function normalizePlanMeal(foodValue: unknown, noteValue: unknown) {
+  const rawFood = String(foodValue || '').trim();
+  const rawNote = String(noteValue || '').trim();
+  const foodParts = extractPlanFragments(rawFood);
+  const noteParts = extractPlanFragments(rawNote);
+  const consumables = uniquePlanItems([...foodParts.consumables, ...noteParts.consumables]);
+  return {
+    food: consumables.length > 0 ? consumables.join('＋') : rawFood || '待确认食物',
+    note: uniquePlanItems([...foodParts.notes, ...noteParts.notes]).join('；'),
+    supplements: uniquePlanItems([...foodParts.supplements, ...noteParts.supplements]),
+  };
+}
+
+function supplementMatchesMeal(raw: string, time: string): boolean {
+  const timed = raw.match(/\b(\d{1,2}:\d{2})\b/);
+  if (timed) return timed[1] === time;
+  const hour = Number(time.slice(0, 2));
+  if (/早餐|早上/.test(raw)) return hour < 11;
+  if (/午餐|中午/.test(raw)) return hour >= 11 && hour < 18;
+  if (/晚餐|晚上/.test(raw)) return hour >= 18;
+  return false;
+}
+
+function normalizeFeedingPlanPayload(plan: Record<string, unknown>): Record<string, unknown> {
+  const stages = Array.isArray(plan.stages) ? plan.stages : [];
+  return {
+    ...plan,
+    stages: stages.map(rawStage => {
+      const stage = rawStage && typeof rawStage === 'object' ? rawStage as Record<string, unknown> : {};
+      const rawMeals = Array.isArray(stage.meals) ? stage.meals : [];
+      const meals = rawMeals.map(rawMeal => {
+        const meal = rawMeal && typeof rawMeal === 'object' ? rawMeal as Record<string, unknown> : {};
+        const normalized = normalizePlanMeal(meal.food, meal.note);
+        return { time: String(meal.time || '08:00'), food: normalized.food, note: normalized.note, supplementItems: normalized.supplements };
+      });
+
+      const stageSupplementGroups = String(stage.supplements || '')
+        .split(/[；;\n]/)
+        .map(value => value.trim())
+        .filter(Boolean);
+      stageSupplementGroups.forEach(group => {
+        const entries = extractPlanFragments(group).consumables.filter(item => PLAN_SUPPLEMENT.test(item));
+        if (entries.length === 0 || meals.length === 0) return;
+        const matchingIndex = meals.findIndex(meal => supplementMatchesMeal(group, meal.time));
+        const target = meals[matchingIndex >= 0 ? matchingIndex : 0];
+        target.food = appendPlanItems(target.food, entries);
+        target.supplementItems = uniquePlanItems([...target.supplementItems, ...entries]);
+      });
+
+      const derivedSupplements = meals.flatMap(meal =>
+        meal.supplementItems.length > 0 ? [`${meal.time} ${meal.supplementItems.join('＋')}`] : []
+      );
+      return {
+        ...stage,
+        meals: meals.map(meal => ({ time: meal.time, food: meal.food, note: meal.note })),
+        supplements: uniquePlanItems([...stageSupplementGroups, ...derivedSupplements]).join('；'),
+      };
+    }),
+  };
+}
+
 function formatFeedingPlanResult(result: unknown): string {
   const raw = getText(result).trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
   const parsed = JSON.parse(raw) as { reply?: unknown; plan?: unknown };
   if (!parsed.plan || typeof parsed.plan !== 'object') throw new Error('饮食计划解析不完整');
-  const plan = parsed.plan as Record<string, unknown>;
+  const plan = normalizeFeedingPlanPayload(parsed.plan as Record<string, unknown>);
   if (!Array.isArray(plan.stages) || plan.stages.length === 0) throw new Error('饮食计划缺少阶段或餐次');
   const reply = typeof parsed.reply === 'string' && parsed.reply.trim()
     ? parsed.reply.trim()
@@ -240,11 +347,11 @@ function parseExplicitFeedingPlan(text: string): Record<string, unknown> | null 
     };
   });
 
-  return {
+  return normalizeFeedingPlanPayload({
     name: planName,
     active: /设为当前计划\s*[:：]\s*是/.test(normalized),
     stages,
-  };
+  });
 }
 
 function validateImage(dataUrl: string): string {
@@ -359,7 +466,7 @@ const worker = {
         const structuredMessages = [
           {
             role: 'system',
-            content: '从对话中提取用户明确提供的喂食计划。只保留实际出现的阶段、日期、餐次和注意事项，不得自行补充阶段或日期。日期使用 YYYY-MM-DD。每餐的克数和冲泡方式写入 food 或 note。reply 只写一句简短确认。',
+            content: '从对话中提取用户明确提供的喂食计划。只保留实际出现的阶段、日期、餐次和注意事项，不得自行补充阶段或日期。日期使用 YYYY-MM-DD。每餐所有会消耗库存的主粮、奶粉、乳铁蛋白、益生菌等及各自用量必须全部写入 meal.food；温水、冲泡、分碗和观察说明只能写入 meal.note；营养补充剂还要按使用餐次汇总到 stage.supplements。reply 只写一句简短确认。',
           },
           ...history,
         ];

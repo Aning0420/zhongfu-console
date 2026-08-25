@@ -161,8 +161,10 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
 } {
   if (!record.completed) return { orders, deductions: [] };
 
-  const source = `${record.foodName} ${record.amount}`;
-  const normalizedSource = normalizeStockProductName(record.foodName);
+  // Include legacy plan notes so measured milk powder or supplements that were
+  // previously placed in notes can still participate in inventory deduction.
+  const source = `${record.foodName} ${record.amount} ${record.note}`;
+  const normalizedSource = normalizeStockProductName(`${record.foodName} ${record.note}`);
   const eligibleOrders = orders.filter(order =>
     ['delivered', 'shipped', 'pending'].includes(order.status)
     && order.quantity - order.consumed > 0

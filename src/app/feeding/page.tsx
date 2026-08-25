@@ -115,7 +115,9 @@ export default function FeedingPage() {
         date: selectedDate,
         mealType,
         foodName,
-        amount: planMealAmount(`${foodName} ${meal.note}`),
+        // Only consumables belong in the amount field. Preparation water stays
+        // in the note and must not be treated as stock consumption.
+        amount: planMealAmount(foodName),
         completed: false,
         note,
         plannedTime: meal.time,

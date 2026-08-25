@@ -31,6 +31,72 @@ function genMsgId(): string {
   return `msg_${_msgId}_${Date.now()}`;
 }
 
+const CONSUMABLE_AMOUNT = /(?:\d+(?:\.\d+)?\s*(?:g|克|mg|毫克|ml|毫升|袋|包|片|粒|胶囊)|半\s*(?:袋|包|片|粒|胶囊))/i;
+const NON_STOCK_LIQUID = /(温水|凉白开|清水|饮用水|纯净水)/;
+
+interface ConsumableEntry {
+  item: string;
+  raw: string;
+}
+
+/**
+ * Split a plan fragment into stock-consuming items. A time or meal label on
+ * the group is inherited by every item after a plus sign, so
+ * "13:00乳铁蛋白0.225g＋益生菌1g" stays one timed supplement group.
+ */
+function extractConsumableEntries(value: string): ConsumableEntry[] {
+  return value
+    .split(/[；;\n|｜]/)
+    .flatMap(group => {
+      const rawGroup = group.trim();
+      if (!rawGroup) return [];
+      const prefix = rawGroup.match(/^\s*(?:(?:营养补充|补充剂|补充)\s*[:：]?\s*)?(?:(?:\d{1,2}:\d{2})|早餐|午餐|晚餐|早上|中午|晚上)?\s*/i)?.[0] || '';
+      return rawGroup.split(/[＋+、，,]/).map((raw, index) => ({
+        raw: raw.trim(),
+        source: index === 0 ? raw.trim() : `${prefix}${raw.trim()}`,
+      }));
+    })
+    .map(({ source }) => {
+      let item = source
+        .replace(/^\s*\d{1,2}:\d{2}\s*/, '')
+        .replace(/^\s*(?:早餐|午餐|晚餐|早上|中午|晚上|每餐|营养补充|补充剂|补充|添加)\s*[:：]?\s*/i, '')
+        .replace(/^\s*\d{1,2}:\d{2}\s*/, '')
+        .trim();
+      const amountMatch = item.match(CONSUMABLE_AMOUNT);
+      if (!amountMatch || NON_STOCK_LIQUID.test(item)) return null;
+      if (amountMatch?.index !== undefined) item = item.slice(0, amountMatch.index + amountMatch[0].length).trim();
+      return item ? { item, raw: source } : null;
+    })
+    .filter((entry): entry is ConsumableEntry => Boolean(entry));
+}
+
+function consumableIdentity(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s＋+、，,；;:：]/g, '');
+}
+
+function appendConsumables(food: string, entries: string[]): string {
+  const result = food.trim();
+  let existing = consumableIdentity(result);
+  const additions = entries.filter(item => {
+    const normalized = consumableIdentity(item);
+    if (!normalized || existing.includes(normalized)) return false;
+    existing += normalized;
+    return true;
+  });
+  return [result, ...additions].filter(Boolean).join('＋');
+}
+
+function mealMatchesSupplement(entry: ConsumableEntry, mealTime: string): boolean {
+  const raw = entry.raw;
+  const timed = raw.match(/\b(\d{1,2}:\d{2})\b/);
+  if (timed) return timed[1] === mealTime;
+  const hour = Number(mealTime.slice(0, 2));
+  if (/早餐|早上/.test(raw)) return hour < 11;
+  if (/午餐|中午/.test(raw)) return hour >= 11 && hour < 18;
+  if (/晚餐|晚上/.test(raw)) return hour >= 18;
+  return false;
+}
+
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   const candidate = String(value || '');
   return allowed.includes(candidate as T) ? candidate as T : fallback;
@@ -201,12 +267,51 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         const stages = rawStages.map((rawStage, stageIndex) => {
           const stage = rawStage as Record<string, unknown>;
           const rawMeals = Array.isArray(stage.meals) ? stage.meals : [];
-          const meals = rawMeals.map(rawMeal => {
+          const parsedMeals = rawMeals.map(rawMeal => {
             const meal = rawMeal as Record<string, unknown>;
             return {
               time: String(meal.time || '08:00'),
               food: String(meal.food || '待确认食物'),
               note: String(meal.note || ''),
+            };
+          });
+          // Keep a stage-level summary for display, but put every measured
+          // consumable into the meal food text so inventory deduction can see
+          // milk powder and supplements as separate stock items.
+          const supplementPattern = /(乳铁蛋白|益生菌|补充剂|营养补充)/;
+          const sourceSupplements = [
+            String(stage.supplements || ''),
+            String(stage.description || ''),
+            ...parsedMeals.map(meal => meal.note),
+          ]
+            .flatMap(value => value.split(/[；;\n]/))
+            .map(value => value.trim())
+            .filter(value => value && value !== '无' && supplementPattern.test(value));
+          const supplements = Array.from(new Set(sourceSupplements)).join('；');
+          const stageSupplementEntries = extractConsumableEntries(String(stage.supplements || ''));
+          const meals = parsedMeals.map(meal => {
+            const noteParts = meal.note.split(/[；;\n]/).map(value => value.trim()).filter(Boolean);
+            const noteEntries = noteParts.flatMap(part => extractConsumableEntries(part));
+            const timedStageEntries = stageSupplementEntries
+              .filter(entry => mealMatchesSupplement(entry, meal.time))
+              .map(entry => entry.item);
+            // An untimed supplement is recorded once, on the first meal. This
+            // avoids multiplying a daily dose across all three meals.
+            const untimedStageEntries = stageSupplementEntries
+              .filter(entry => !/\b\d{1,2}:\d{2}\b/.test(entry.raw) && !/(早餐|午餐|晚餐|早上|中午|晚上)/.test(entry.raw))
+              .filter(() => parsedMeals[0]?.time === meal.time)
+              .map(entry => entry.item);
+            return {
+              ...meal,
+              food: appendConsumables(meal.food, [
+                ...noteEntries.map(entry => entry.item),
+                ...timedStageEntries,
+                ...untimedStageEntries,
+              ]),
+              note: noteParts
+                .flatMap(part => part.split(/[＋+、，,]/).map(value => value.trim()))
+                .filter(part => part && extractConsumableEntries(part).length === 0)
+                .join('；'),
             };
           });
           return {
@@ -217,7 +322,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
             description: String(stage.description || ''),
             mealsPerDay: Math.max(1, meals.length),
             mealSchedule: meals.length > 0 ? meals : [{ time: '08:00', food: '待确认食物', note: '' }],
-            supplements: String(stage.supplements || ''),
+            supplements,
           };
         });
         const active = d.active !== false;
