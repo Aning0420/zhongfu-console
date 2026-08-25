@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage } from '@/lib/store';
-import { Plus, Search, Package, PackageMinus, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown } from 'lucide-react';
+import { Plus, Search, Package, PackageMinus, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -22,6 +22,54 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
 };
+
+type SortField = 'name' | 'category' | 'purchaseDate' | 'status';
+type SortDirection = 'asc' | 'desc';
+
+const SORT_STORAGE_KEY = 'zhongfu-procurement-sort';
+const sortFieldLabels: Record<SortField, string> = {
+  name: '名称',
+  category: '分类',
+  purchaseDate: '采购时间',
+  status: '状态',
+};
+const statusSortOrder: Record<Order['status'], number> = {
+  pending: 0,
+  shipped: 1,
+  delivered: 2,
+  cancelled: 3,
+};
+const chineseCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+
+function SortableHeader({ field, label, activeField, direction, onSort }: {
+  field: SortField;
+  label: string;
+  activeField: SortField;
+  direction: SortDirection;
+  onSort: (field: SortField) => void;
+}) {
+  const active = field === activeField;
+  const Icon = active ? (direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th
+      className="px-4 py-3 text-left font-medium text-muted-foreground"
+      aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={cn(
+          'inline-flex items-center gap-1.5 whitespace-nowrap transition-colors hover:text-foreground',
+          active && 'text-foreground'
+        )}
+        title={`按${label}排序${active ? `，当前${direction === 'asc' ? '正序' : '倒序'}` : ''}`}
+      >
+        {label}
+        <Icon className={cn('h-3.5 w-3.5', !active && 'opacity-45')} />
+      </button>
+    </th>
+  );
+}
 
 /** Get depletion info for an order */
 function getExpiryInfo(order: Order): { daysLeft: number; expiryDate: string } | null {
@@ -59,8 +107,39 @@ export default function ProcurementPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<SortField>('purchaseDate');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [sortReady, setSortReady] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [usageOrder, setUsageOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SORT_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as { field?: string; direction?: string };
+        if (saved.field && saved.field in sortFieldLabels) setSortField(saved.field as SortField);
+        if (saved.direction === 'asc' || saved.direction === 'desc') setSortDirection(saved.direction);
+      }
+    } catch {
+      // Ignore an invalid saved preference and keep the useful default.
+    }
+    setSortReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sortReady) return;
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: sortField, direction: sortDirection }));
+  }, [sortField, sortDirection, sortReady]);
+
+  const changeSortField = (field: SortField) => {
+    if (field === sortField) {
+      setSortDirection(current => current === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    setSortField(field);
+    setSortDirection(field === 'purchaseDate' ? 'desc' : 'asc');
+  };
 
   const filteredOrders = useMemo(() => {
     return state.orders
@@ -76,8 +155,18 @@ export default function ProcurementPage() {
         if (search && !o.itemName.includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
         return true;
       })
-      .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate));
-  }, [state.orders, state.feedingRecords, search, statusFilter, categoryFilter]);
+      .sort((a, b) => {
+        let comparison = 0;
+        if (sortField === 'name') comparison = chineseCollator.compare(a.itemName, b.itemName);
+        if (sortField === 'category') comparison = chineseCollator.compare(a.category, b.category);
+        if (sortField === 'purchaseDate') comparison = a.purchaseDate.localeCompare(b.purchaseDate);
+        if (sortField === 'status') comparison = statusSortOrder[a.status] - statusSortOrder[b.status];
+        if (comparison !== 0) return sortDirection === 'asc' ? comparison : -comparison;
+        return b.purchaseDate.localeCompare(a.purchaseDate)
+          || chineseCollator.compare(a.itemName, b.itemName)
+          || chineseCollator.compare(a.id, b.id);
+      });
+  }, [state.orders, state.feedingRecords, search, statusFilter, categoryFilter, sortField, sortDirection]);
 
   // Items expiring within 7 days
   const expiringItems = useMemo(() => {
@@ -315,6 +404,29 @@ export default function ProcurementPage() {
             <SelectItem value="cancelled">已取消</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={sortField} onValueChange={value => changeSortField(value as SortField)}>
+          <SelectTrigger className="w-[150px] bg-card">
+            <ArrowUpDown className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+            <SelectValue aria-label="排序依据" />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.entries(sortFieldLabels) as [SortField, string][]).map(([field, label]) => (
+              <SelectItem key={field} value={field}>按{label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sortDirection} onValueChange={value => setSortDirection(value as SortDirection)}>
+          <SelectTrigger className="w-[112px] bg-card">
+            {sortDirection === 'asc'
+              ? <ArrowUp className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+              : <ArrowDown className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />}
+            <SelectValue aria-label="排序方向" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="asc">正序</SelectItem>
+            <SelectItem value="desc">倒序</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Orders Table */}
@@ -323,16 +435,16 @@ export default function ProcurementPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">物资名称</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">分类</th>
+                <SortableHeader field="name" label="物资名称" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
+                <SortableHeader field="category" label="分类" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">库存</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">单价</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">供应商</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">采购时间</th>
+                <SortableHeader field="purchaseDate" label="采购时间" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">生产日期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">保质期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">预计耗尽</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">状态</th>
+                <SortableHeader field="status" label="状态" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">操作</th>
               </tr>
             </thead>
