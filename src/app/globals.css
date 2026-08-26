@@ -141,6 +141,26 @@ body {
   .card-warm:hover {
     @apply shadow-[0_4px_12px_rgba(0,0,0,0.08)] -translate-y-0.5;
   }
+  .procurement-top-scrollbar {
+    scrollbar-color: #87CEEB #E9F3F5;
+    scrollbar-width: auto;
+  }
+  .procurement-top-scrollbar::-webkit-scrollbar {
+    height: 12px;
+  }
+  .procurement-top-scrollbar::-webkit-scrollbar-track {
+    background: #E9F3F5;
+    border-radius: 4px;
+  }
+  .procurement-top-scrollbar::-webkit-scrollbar-thumb {
+    min-width: 48px;
+    background: #87CEEB;
+    border: 2px solid #E9F3F5;
+    border-radius: 4px;
+  }
+  .procurement-top-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #6AB6D6;
+  }
   .btn-press {
     @apply active:scale-[0.98] transition-transform duration-100;
   }

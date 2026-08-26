@@ -128,6 +128,11 @@ export default function ProcurementPage() {
   const [stockAdjustment, setStockAdjustment] = useState<{ order: Order; mode: 'consume' | 'restore' } | null>(null);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
   const ordersSectionRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
 
   useEffect(() => {
     const requestedFilter = new URLSearchParams(window.location.search).get('filter');
@@ -154,6 +159,35 @@ export default function ProcurementPage() {
     if (!sortReady) return;
     localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: sortField, direction: sortDirection }));
   }, [sortField, sortDirection, sortReady]);
+
+  useEffect(() => {
+    const tableScroll = tableScrollRef.current;
+    const table = tableRef.current;
+    if (!tableScroll || !table) return;
+
+    const updateScrollMetrics = () => {
+      setTableScrollWidth(tableScroll.scrollWidth);
+      setHasHorizontalOverflow(tableScroll.scrollWidth > tableScroll.clientWidth + 1);
+    };
+    const observer = new ResizeObserver(updateScrollMetrics);
+    observer.observe(tableScroll);
+    observer.observe(table);
+    updateScrollMetrics();
+
+    return () => observer.disconnect();
+  }, []);
+
+  const syncHorizontalScroll = (source: 'top' | 'table') => {
+    const topScroll = topScrollRef.current;
+    const tableScroll = tableScrollRef.current;
+    if (!topScroll || !tableScroll) return;
+    if (source === 'top' && tableScroll.scrollLeft !== topScroll.scrollLeft) {
+      tableScroll.scrollLeft = topScroll.scrollLeft;
+    }
+    if (source === 'table' && topScroll.scrollLeft !== tableScroll.scrollLeft) {
+      topScroll.scrollLeft = tableScroll.scrollLeft;
+    }
+  };
 
   const changeSortField = (field: SortField) => {
     if (field === sortField) {
@@ -467,9 +501,26 @@ export default function ProcurementPage() {
       </div>
 
       {/* Orders Table */}
-      <div className="card-warm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      <div className="relative">
+        {hasHorizontalOverflow && (
+          <div className="sticky top-2 z-20 mb-2 rounded-md border border-border bg-card/95 px-1 py-1 shadow-sm backdrop-blur">
+            <div
+              ref={topScrollRef}
+              className="procurement-top-scrollbar overflow-x-scroll"
+              onScroll={() => syncHorizontalScroll('top')}
+              aria-label="采购表横向滚动条"
+            >
+              <div className="h-px" style={{ width: tableScrollWidth }} />
+            </div>
+          </div>
+        )}
+        <div className="card-warm overflow-hidden">
+          <div
+            ref={tableScrollRef}
+            className="overflow-x-auto"
+            onScroll={() => syncHorizontalScroll('table')}
+          >
+            <table ref={tableRef} className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <SortableHeader field="name" label="物资名称" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
@@ -614,10 +665,11 @@ export default function ProcurementPage() {
                 );
               })}
             </tbody>
-          </table>
-          {filteredOrders.length === 0 && (
-            <div className="text-center py-12 text-muted-foreground text-sm">没有找到匹配的订单</div>
-          )}
+            </table>
+            {filteredOrders.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground text-sm">没有找到匹配的订单</div>
+            )}
+          </div>
         </div>
       </div>
       {stockAdjustment && (
