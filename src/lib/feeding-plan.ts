@@ -55,3 +55,55 @@ export function plannedFeedingRecordsForDate(plan: FeedingPlan, date: string): O
     };
   });
 }
+
+export function reconcilePlannedFeedingRecords(
+  existingRecords: FeedingRecord[],
+  date: string,
+  planId: string,
+  plannedRecords: Omit<FeedingRecord, 'id'>[],
+  createId: () => string,
+): { records: FeedingRecord[]; changed: boolean } {
+  const plannedTimes = new Set(plannedRecords.map(record => record.plannedTime).filter(Boolean));
+  const completedTimes = new Set(
+    existingRecords
+      .filter(record => record.date === date && record.planId && record.completed && record.plannedTime)
+      .map(record => record.plannedTime)
+  );
+  const keptIncompleteTimes = new Set<string>();
+  let changed = false;
+
+  const records = existingRecords.filter(record => {
+    if (record.date !== date || !record.planId || record.completed || !record.plannedTime) return true;
+    if (!plannedTimes.has(record.plannedTime) || completedTimes.has(record.plannedTime) || keptIncompleteTimes.has(record.plannedTime)) {
+      changed = true;
+      return false;
+    }
+    keptIncompleteTimes.add(record.plannedTime);
+    return true;
+  });
+
+  plannedRecords.forEach(plannedRecord => {
+    const plannedTime = plannedRecord.plannedTime;
+    if (!plannedTime || completedTimes.has(plannedTime)) return;
+    const index = records.findIndex(record =>
+      record.date === date && Boolean(record.planId) && !record.completed && record.plannedTime === plannedTime
+    );
+    if (index === -1) {
+      records.push({ ...plannedRecord, id: createId() });
+      changed = true;
+      return;
+    }
+
+    const current = records[index];
+    if (
+      current.planId !== planId || current.mealType !== plannedRecord.mealType
+      || current.foodName !== plannedRecord.foodName || current.amount !== plannedRecord.amount
+      || current.note !== plannedRecord.note || current.planStageId !== plannedRecord.planStageId
+    ) {
+      records[index] = { ...current, ...plannedRecord };
+      changed = true;
+    }
+  });
+
+  return { records, changed };
+}

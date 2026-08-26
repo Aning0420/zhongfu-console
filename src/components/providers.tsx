@@ -16,7 +16,7 @@ import {
   type Expense,
   type ChatMessage,
 } from '@/lib/store';
-import { plannedFeedingRecordsForDate } from '@/lib/feeding-plan';
+import { plannedFeedingRecordsForDate, reconcilePlannedFeedingRecords } from '@/lib/feeding-plan';
 import { localDateKey, millisecondsUntilNextLocalDay } from '@/lib/local-date';
 import {
   clearStoredSyncKey,
@@ -421,37 +421,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const syncPlannedFeedingRecords = useCallback((date: string, planId: string, records: Omit<FeedingRecord, 'id'>[]) => {
     setState(prev => {
-      const plannedTimes = new Set(records.map(record => record.plannedTime));
-      let changed = false;
-      const nextRecords = prev.feedingRecords.filter(record => {
-        const stale = record.date === date && record.planId === planId && !record.completed
-          && !plannedTimes.has(record.plannedTime);
-        if (stale) changed = true;
-        return !stale;
-      });
-
-      records.forEach(record => {
-        const index = nextRecords.findIndex(current =>
-          current.date === date && current.planId === planId && current.plannedTime === record.plannedTime
-        );
-        if (index === -1) {
-          nextRecords.push({ ...record, id: genId('f') });
-          changed = true;
-          return;
-        }
-
-        const current = nextRecords[index];
-        if (!current.completed && (
-          current.mealType !== record.mealType || current.foodName !== record.foodName
-          || current.amount !== record.amount || current.note !== record.note
-          || current.planStageId !== record.planStageId
-        )) {
-          nextRecords[index] = { ...current, ...record };
-          changed = true;
-        }
-      });
-
-      return changed ? { ...prev, feedingRecords: nextRecords } : prev;
+      const result = reconcilePlannedFeedingRecords(prev.feedingRecords, date, planId, records, () => genId('f'));
+      return result.changed ? { ...prev, feedingRecords: result.records } : prev;
     });
   }, []);
 
