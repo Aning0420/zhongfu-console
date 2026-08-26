@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { AppProvider } from '@/components/providers';
 import Sidebar, { FloatingPawButton } from '@/components/sidebar';
 import { ChatDialog } from '@/components/chat-dialog';
@@ -9,6 +10,7 @@ import { PwaRegister } from '@/components/pwa-register';
 import { LocalDataDialog } from '@/components/local-data-dialog';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [chatOpen, setChatOpen] = useState(false);
   const [quickEntryOpen, setQuickEntryOpen] = useState(false);
   const [localDataOpen, setLocalDataOpen] = useState(false);
@@ -44,7 +46,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <FloatingPawButton onClick={() => setSidebarVisibility(false)} />
         )}
         <main className="app-main flex-1 min-w-0 overflow-x-hidden p-4 sm:p-6 transition-all duration-300">
-          <div className="max-w-[1200px] mx-auto">
+          <div className={pathname === '/procurement' ? 'mx-auto w-full max-w-[1800px]' : 'mx-auto max-w-[1200px]'}>
             {children}
           </div>
         </main>

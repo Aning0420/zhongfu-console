@@ -133,6 +133,7 @@ export default function ProcurementPage() {
   const tableRef = useRef<HTMLTableElement>(null);
   const [tableScrollWidth, setTableScrollWidth] = useState(0);
   const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+  const [windowScrollGeometry, setWindowScrollGeometry] = useState({ left: 0, width: 0 });
 
   useEffect(() => {
     const requestedFilter = new URLSearchParams(window.location.search).get('filter');
@@ -168,6 +169,8 @@ export default function ProcurementPage() {
     const updateScrollMetrics = () => {
       setTableScrollWidth(tableScroll.scrollWidth);
       setHasHorizontalOverflow(tableScroll.scrollWidth > tableScroll.clientWidth + 1);
+      const bounds = tableScroll.getBoundingClientRect();
+      setWindowScrollGeometry({ left: bounds.left, width: bounds.width });
     };
     const observer = new ResizeObserver(updateScrollMetrics);
     observer.observe(tableScroll);
@@ -502,18 +505,6 @@ export default function ProcurementPage() {
 
       {/* Orders Table */}
       <div className="relative">
-        {hasHorizontalOverflow && (
-          <div className="sticky top-2 z-20 mb-2 rounded-md border border-border bg-card/95 px-1 py-1 shadow-sm backdrop-blur">
-            <div
-              ref={topScrollRef}
-              className="procurement-top-scrollbar overflow-x-scroll"
-              onScroll={() => syncHorizontalScroll('top')}
-              aria-label="采购表横向滚动条"
-            >
-              <div className="h-px" style={{ width: tableScrollWidth }} />
-            </div>
-          </div>
-        )}
         <div className="card-warm overflow-hidden">
           <div
             ref={tableScrollRef}
@@ -672,6 +663,21 @@ export default function ProcurementPage() {
           </div>
         </div>
       </div>
+      {hasHorizontalOverflow && windowScrollGeometry.width > 0 && (
+        <div
+          className="procurement-window-scrollbar fixed bottom-2 z-50 overflow-hidden rounded-md bg-card/95 shadow-md backdrop-blur"
+          style={{ left: windowScrollGeometry.left, width: windowScrollGeometry.width, bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+        >
+          <div
+            ref={topScrollRef}
+            className="procurement-top-scrollbar overflow-x-scroll"
+            onScroll={() => syncHorizontalScroll('top')}
+            aria-label="采购表横向滚动条"
+          >
+            <div className="h-px" style={{ width: tableScrollWidth }} />
+          </div>
+        </div>
+      )}
       {stockAdjustment && (
         <InventoryAdjustmentDialog
           key={`${stockAdjustment.order.id}-${stockAdjustment.mode}`}
