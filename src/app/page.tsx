@@ -24,7 +24,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { calcDailyUsage, conciseFeedingNote, type FeedingRecord, type Order } from '@/lib/store';
+import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
 
 export default function DashboardPage() {
@@ -69,9 +69,10 @@ export default function DashboardPage() {
       .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
         const remaining = order.quantity - order.consumed;
-        const dailyUsage = order.dailyUsage && order.dailyUsage > 0
-          ? order.dailyUsage
-          : calcDailyUsage(order.itemName, state.feedingRecords);
+        const observedUsage = calcDailyUsage(order.itemName, state.feedingRecords, order.unit);
+        const dailyUsage = observedUsage > 0
+          ? observedUsage
+          : normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
         if (remaining <= 0) {
           return { order, daysLeft: 0, depletionDate: today, dailyUsage: dailyUsage || 0, remaining: 0 };
         }
@@ -321,7 +322,7 @@ export default function DashboardPage() {
                 <span className="text-sm font-medium text-foreground">{item.order.itemName}</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-muted-foreground">
-                    剩余 {item.remaining}{item.order.unit} · 日均 {item.dailyUsage.toFixed(1)}{item.order.unit}
+                    剩余 {item.remaining}{item.order.unit} · 日均 {formatInventoryDailyUsage(item.dailyUsage, item.order.unit)}
                   </span>
                   <span className={cn(
                     'text-xs font-medium px-2 py-0.5 rounded-full',

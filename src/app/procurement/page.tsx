@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
-import { calcDailyUsage, getPriceHistory, orderTotalPrice } from '@/lib/store';
+import { calcDailyUsage, formatInventoryDailyUsage, getPriceHistory, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
 import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
@@ -99,12 +99,20 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
   if (remaining <= 0) {
     return { daysLeft: 0, depletionDate: localDateKey(), dailyUsage: 0 };
   }
-  const dailyUsage = order.dailyUsage && order.dailyUsage > 0
-    ? order.dailyUsage
-    : calcDailyUsage(order.itemName, feedingRecords);
+  // Feeding records are measured in their own units (usually grams). Convert
+  // observed usage to the inventory unit before estimating depletion. This
+  // prevents 30g/day from being interpreted as 30kg/day.
+  const dailyUsage = getDailyUsage(order, feedingRecords);
   if (dailyUsage <= 0) return null;
   const daysLeft = Math.floor(remaining / dailyUsage);
   return { daysLeft, depletionDate: addLocalDays(localDateKey(), daysLeft), dailyUsage };
+}
+
+function getDailyUsage(order: Order, feedingRecords: FeedingRecord[]): number {
+  const observedUsage = calcDailyUsage(order.itemName, feedingRecords, order.unit);
+  return observedUsage > 0
+    ? observedUsage
+    : normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
 }
 
 export default function ProcurementPage() {
@@ -316,7 +324,7 @@ export default function ProcurementPage() {
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">{order.itemName}</span>
                   <span className="text-xs text-muted-foreground">剩余 {order.quantity - order.consumed}{order.unit}</span>
-                  <span className="text-xs text-muted-foreground">· 日均消耗 {dailyUsage}{order.unit}</span>
+                  <span className="text-xs text-muted-foreground">· 日均消耗 {formatInventoryDailyUsage(dailyUsage, order.unit)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">预计 {depletionDate} 耗尽</span>
@@ -467,6 +475,7 @@ export default function ProcurementPage() {
                 <SortableHeader field="name" label="物资名称" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <SortableHeader field="category" label="分类" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">库存</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">日均消耗</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">单价</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">供应商</th>
                 <SortableHeader field="purchaseDate" label="采购时间" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
@@ -483,6 +492,7 @@ export default function ProcurementPage() {
                 const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
+                const dailyUsage = getDailyUsage(order, state.feedingRecords);
                 const depletion = getDepletionInfo(order, state.feedingRecords);
                 const needsRestock = order.status === 'delivered' && !order.repurchasedAt
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
@@ -521,6 +531,9 @@ export default function ProcurementPage() {
                           {remaining}{order.unit}
                         </span>
                       </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                      {formatInventoryDailyUsage(dailyUsage, order.unit)}
                     </td>
                     <td className="px-4 py-3 text-foreground">
                       <div className="whitespace-nowrap font-medium">¥{order.unitPrice.toFixed(2)}/{order.unit}</div>
@@ -651,8 +664,9 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
 }) {
   const remaining = Math.max(0, order.quantity - order.consumed);
   const maximum = mode === 'consume' ? remaining : order.consumed;
-  const suggested = mode === 'consume' && order.dailyUsage && order.dailyUsage > 0
-    ? Math.min(order.dailyUsage, maximum)
+  const configuredUsage = normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
+  const suggested = mode === 'consume' && configuredUsage > 0
+    ? Math.min(configuredUsage, maximum)
     : Math.min(1, maximum);
   const [amount, setAmount] = useState(String(suggested));
   const parsedAmount = Number(amount);

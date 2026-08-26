@@ -153,6 +153,37 @@ export function convertInventoryAmount(value: number, fromUnit: string, toUnit: 
   return (value * from.factor) / to.factor;
 }
 
+/**
+ * Older records sometimes stored gram-based daily usage on kilogram orders
+ * (for example 30 instead of 0.03). Correct only clearly impossible values
+ * that exceed the stock quantity; ordinary configured values remain unchanged.
+ */
+export function normalizeConfiguredDailyUsage(value: number | undefined, unit: string, stockQuantity?: number): number {
+  if (!Number.isFinite(value) || (value ?? 0) <= 0) return 0;
+  const numericValue = value as number;
+  const normalizedUnit = unitInfo(unit).unit;
+  const isLargeUnit = normalizedUnit === 'kg' || normalizedUnit === 'l';
+  if (isLargeUnit && Number.isFinite(stockQuantity) && (stockQuantity ?? 0) > 0 && numericValue > (stockQuantity as number)) {
+    return numericValue / 1000;
+  }
+  return numericValue;
+}
+
+export function formatInventoryDailyUsage(value: number, unit: string): string {
+  if (!Number.isFinite(value) || value <= 0) return '待记录';
+  const rounded = (amount: number) => String(Number(amount.toFixed(amount < 1 ? 4 : 2)));
+  const normalizedUnit = unitInfo(unit).unit;
+  if (normalizedUnit === 'kg') {
+    const grams = convertInventoryAmount(value, unit, 'g');
+    return grams ? `${rounded(value)}kg/天（${rounded(grams)}g/天）` : `${rounded(value)}${unit}/天`;
+  }
+  if (normalizedUnit === 'l') {
+    const milliliters = convertInventoryAmount(value, unit, 'ml');
+    return milliliters ? `${rounded(value)}L/天（${rounded(milliliters)}ml/天）` : `${rounded(value)}${unit}/天`;
+  }
+  return `${rounded(value)}${unit}/天`;
+}
+
 function roundInventory(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
@@ -510,29 +541,64 @@ export function parseBackup(raw: string): AppState {
   };
 }
 
-/** Calculate average daily consumption for an item based on feeding records */
-export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[]): number {
-  const matches = feedingRecords.filter(r =>
-    r.foodName && (
-      r.foodName.toLowerCase().includes(itemName.toLowerCase()) ||
-      itemName.toLowerCase().includes(r.foodName.toLowerCase())
-    )
+function feedingUsageAmount(itemName: string, record: FeedingRecord): ParsedAmount | null {
+  const source = `${record.foodName} ${record.note}`;
+  const normalizedSource = normalizeStockProductName(source);
+  const normalizedItem = normalizeStockProductName(itemName);
+  const kind = stockProductKind(itemName);
+  if (!normalizedItem || (!normalizedSource.includes(normalizedItem) && !(kind && normalizedSource.includes(kind)))) {
+    return null;
+  }
+
+  const displayName = itemName
+    .replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '')
+    .trim();
+  const sourceLower = source.toLocaleLowerCase('zh-CN');
+  const literalName = displayName.toLocaleLowerCase('zh-CN');
+  const literalIndex = literalName ? sourceLower.indexOf(literalName) : -1;
+  const kindIndex = kind ? sourceLower.indexOf(kind.toLocaleLowerCase('zh-CN')) : -1;
+  const tokenIndex = literalIndex >= 0 ? literalIndex : kindIndex;
+  const tokenLength = literalIndex >= 0 ? literalName.length : kind.length;
+  const nearby = tokenIndex >= 0
+    ? source.slice(tokenIndex + tokenLength, tokenIndex + tokenLength + 36).split(/[；;｜|\n]/)[0]
+    : '';
+  const amount = parseAmount(nearby);
+  if (!amount) return null;
+
+  const firstMeasuredItem = source
+    .split(/[＋+；;｜|、，,\n]/)
+    .find(fragment => parseAmount(fragment) && !/(温水|凉白开|清水|饮用水|纯净水)/.test(fragment));
+  const firstItemKey = firstMeasuredItem ? normalizeStockProductName(firstMeasuredItem) : '';
+  const matchesFirstItem = Boolean(
+    firstItemKey
+    && (firstItemKey.includes(normalizedItem) || normalizedItem.includes(firstItemKey) || (kind && firstItemKey.includes(kind)))
   );
-  if (matches.length < 2) return 0;
+  const remaining = matchesFirstItem ? parseAmount(record.remainingAmount) : null;
+  if (!remaining) return amount;
+  const convertedRemaining = convertInventoryAmount(remaining.value, remaining.unit, amount.unit);
+  return convertedRemaining === null
+    ? amount
+    : { ...amount, value: Math.max(0, amount.value - convertedRemaining) };
+}
 
-  const amounts = matches.map(r => {
-    const m = r.amount?.match(/([\d.]+)/);
-    return m ? parseFloat(m[1]) : 0;
-  }).filter(a => a > 0);
-  if (amounts.length < 2) return 0;
+/** Calculate average consumption per observed day, optionally converted to an order's unit. */
+export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[], targetUnit?: string): number {
+  const usages = feedingRecords
+    .filter(record => record.completed)
+    .map(record => ({ record, amount: feedingUsageAmount(itemName, record) }))
+    .filter((entry): entry is { record: FeedingRecord; amount: ParsedAmount } => Boolean(entry.amount));
+  if (usages.length < 2) return 0;
 
-  const dates = matches.map(r => new Date(r.date).getTime()).filter(t => !isNaN(t));
-  if (dates.length < 2) return 0;
+  const usageByDate = new Map<string, number>();
+  usages.forEach(({ record, amount }) => {
+    const converted = targetUnit
+      ? convertInventoryAmount(amount.value, amount.unit, targetUnit)
+      : amount.value;
+    if (converted === null || converted <= 0) return;
+    usageByDate.set(record.date, (usageByDate.get(record.date) || 0) + converted);
+  });
+  if (usageByDate.size === 0) return 0;
 
-  const minDate = Math.min(...dates);
-  const maxDate = Math.max(...dates);
-  const days = Math.max(1, Math.ceil((maxDate - minDate) / (24 * 60 * 60 * 1000)));
-
-  const totalAmount = amounts.reduce((s, a) => s + a, 0);
-  return Math.round((totalAmount / days) * 100) / 100;
+  const totalAmount = Array.from(usageByDate.values()).reduce((sum, amount) => sum + amount, 0);
+  return roundInventory(totalAmount / usageByDate.size);
 }
