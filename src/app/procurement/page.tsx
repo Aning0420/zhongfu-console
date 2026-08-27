@@ -29,6 +29,7 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
 
 type SortField = 'name' | 'category' | 'purchaseDate' | 'status';
 type SortDirection = 'asc' | 'desc';
+type ShelfLifeUnit = NonNullable<Order['shelfLifeUnit']>;
 
 const SORT_STORAGE_KEY = 'zhongfu-procurement-sort';
 const sortFieldLabels: Record<SortField, string> = {
@@ -46,6 +47,29 @@ const statusSortOrder: Record<Order['status'], number> = {
   cancelled: 5,
 };
 const chineseCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+
+function shelfLifeInDays(value: string, unit: ShelfLifeUnit = 'day'): number | undefined {
+  if (!value) return undefined;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return undefined;
+  return unit === 'year' ? amount * 365 : unit === 'month' ? amount * 30 : amount;
+}
+
+function shelfLifeForEditing(days?: number, preferredUnit?: ShelfLifeUnit): { value: string; unit: ShelfLifeUnit } {
+  if (!days || days <= 0) return { value: '', unit: 'day' };
+  if (preferredUnit === 'year') return { value: String(days / 365), unit: 'year' };
+  if (preferredUnit === 'month') return { value: String(days / 30), unit: 'month' };
+  if (preferredUnit === 'day') return { value: String(days), unit: 'day' };
+  if (days % 365 === 0) return { value: String(days / 365), unit: 'year' };
+  if (days % 30 === 0) return { value: String(days / 30), unit: 'month' };
+  return { value: String(days), unit: 'day' };
+}
+
+function formatShelfLife(order: Order): string {
+  const display = shelfLifeForEditing(order.shelfLife, order.shelfLifeUnit);
+  const label = display.unit === 'year' ? '年' : display.unit === 'month' ? '个月' : '天';
+  return display.value ? `${display.value}${label}` : '-';
+}
 
 function SortableHeader({ field, label, activeField, direction, onSort, className }: {
   field: SortField;
@@ -315,7 +339,7 @@ export default function ProcurementPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 新建采购
             </Button>
           </DialogTrigger>
-          <AddOrderDialog orders={state.orders} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />
+          {showAdd && <AddOrderDialog orders={state.orders} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
         </Dialog>
       </div>
 
@@ -600,7 +624,7 @@ export default function ProcurementPage() {
                       {order.shelfLife ? (
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-muted-foreground" />
-                          <span className="text-muted-foreground">{order.shelfLife}天</span>
+                          <span className="text-muted-foreground">{formatShelfLife(order)}</span>
                           {expiry && expiry.daysLeft <= 7 && (
                             <Badge className="ml-1 text-[10px] px-1 py-0 bg-[#E88888]/15 text-[#E88888] border-0">
                               {expiryDaysLabel(expiry.daysLeft, true)}
@@ -805,12 +829,38 @@ function PriceChangeLabel({ history }: { history: NonNullable<ReturnType<typeof 
   );
 }
 
+function ShelfLifeField({ value, unit, onValueChange, onUnitChange, label = '保质期（选填）' }: {
+  value: string;
+  unit: ShelfLifeUnit;
+  onValueChange: (value: string) => void;
+  onUnitChange: (unit: ShelfLifeUnit) => void;
+  label?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <div className="flex gap-2">
+        <Input type="number" min="0" step="any" value={value} onChange={event => onValueChange(event.target.value)} placeholder="如：18" className="min-w-0 flex-1" />
+        <Select value={unit} onValueChange={nextUnit => onUnitChange(nextUnit as ShelfLifeUnit)}>
+          <SelectTrigger className="w-[92px] shrink-0"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="day">天</SelectItem>
+            <SelectItem value="month">月</SelectItem>
+            <SelectItem value="year">年</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
 function EditOrderDialog({ order, orders, onClose, onSave }: {
   order: Order;
   orders: Order[];
   onClose: () => void;
   onSave: (updates: Partial<Omit<Order, 'id'>>) => void;
 }) {
+  const initialShelfLife = shelfLifeForEditing(order.shelfLife, order.shelfLifeUnit);
   const [form, setForm] = useState({
     itemName: order.itemName,
     category: order.category,
@@ -820,7 +870,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     supplier: order.supplier,
     purchaseDate: order.purchaseDate,
     productionDate: order.productionDate || '',
-    shelfLife: order.shelfLife ? String(order.shelfLife) : '',
+    shelfLife: initialShelfLife.value,
+    shelfLifeUnit: initialShelfLife.unit,
     packageSize: order.packageSize ? String(order.packageSize) : '',
     packageUnit: order.packageUnit || '',
     status: order.status,
@@ -855,7 +906,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       supplier: form.supplier.trim(),
       purchaseDate: form.purchaseDate,
       productionDate: form.productionDate || undefined,
-      shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
+      shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
+      shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
       status: form.status,
@@ -935,10 +987,12 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
               <Label>生产日期</Label>
               <Input type="date" value={form.productionDate} onChange={event => setForm(current => ({ ...current, productionDate: event.target.value }))} />
             </div>
-            <div className="space-y-1.5">
-              <Label>保质期（天）</Label>
-              <Input type="number" min="0" step="1" value={form.shelfLife} onChange={event => setForm(current => ({ ...current, shelfLife: event.target.value }))} placeholder="可不填" />
-            </div>
+            <ShelfLifeField
+              value={form.shelfLife}
+              unit={form.shelfLifeUnit}
+              onValueChange={shelfLife => setForm(current => ({ ...current, shelfLife }))}
+              onUnitChange={shelfLifeUnit => setForm(current => ({ ...current, shelfLifeUnit }))}
+            />
           </div>
           {quantity < order.consumed && (
             <p className="text-xs text-[#C56C5C]">总数量小于当前已领用数量，保存后已领用数量会同步调整为 {quantity}{form.unit}。</p>
@@ -958,12 +1012,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
     itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', packageSize: '', packageUnit: '', syncExpense: true,
+    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', packageSize: '', packageUnit: '' },
-    { id: 'bundle_2', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
   ]);
 
   const quantity = Number(form.quantity);
@@ -995,13 +1049,6 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     && bundleRemaining >= -0.005
   );
 
-  const shelfLifeInDays = (value: string, unit: 'day' | 'month' | 'year' = 'day') => {
-    if (!value) return undefined;
-    const amount = Number(value);
-    if (!Number.isFinite(amount) || amount <= 0) return undefined;
-    return unit === 'year' ? amount * 365 : unit === 'month' ? amount * 30 : amount;
-  };
-
   const handleSubmit = () => {
     if (mode === 'bundle') {
       if (!bundleValid) return;
@@ -1020,7 +1067,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           consumed: 0,
           supplier: form.supplier.trim(),
           productionDate: item.productionDate || undefined,
-          shelfLife: shelfLifeInDays(item.shelfLife),
+          shelfLife: shelfLifeInDays(item.shelfLife, item.shelfLifeUnit),
+          shelfLifeUnit: item.shelfLife ? item.shelfLifeUnit : undefined,
           packageSize: item.packageSize ? Number(item.packageSize) : undefined,
           packageUnit: item.packageSize ? item.packageUnit.trim() || undefined : undefined,
         });
@@ -1064,6 +1112,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       supplier: form.supplier,
       productionDate: form.productionDate || undefined,
       shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
+      shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
     });
@@ -1131,10 +1180,13 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                       <Label className="text-xs text-muted-foreground">生产日期（选填）</Label>
                       <Input type="date" value={item.productionDate} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, productionDate: event.target.value } : entry))} aria-label={`明细 ${index + 1} 生产日期`} />
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">保质期天数（选填）</Label>
-                      <Input type="number" min="0" step="1" value={item.shelfLife} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLife: event.target.value } : entry))} placeholder="如：540" />
-                    </div>
+                    <ShelfLifeField
+                      label="保质期（选填）"
+                      value={item.shelfLife}
+                      unit={item.shelfLifeUnit}
+                      onValueChange={shelfLife => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLife } : entry))}
+                      onUnitChange={shelfLifeUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLifeUnit } : entry))}
+                    />
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">每{item.unit || '单位'}内含（选填）</Label>
                       <Input type="number" min="0" step="any" value={item.packageSize} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageSize: event.target.value } : entry))} placeholder="如：20" />
@@ -1146,7 +1198,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', packageSize: '', packageUnit: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -1224,21 +1276,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
               <Label>生产日期</Label>
               <Input type="date" value={form.productionDate} onChange={e => setForm(p => ({ ...p, productionDate: e.target.value }))} />
             </div>
-            <div className="space-y-1.5">
-              <Label>保质期</Label>
-              <div className="flex gap-2">
-                <Input type="number" className="flex-1" value={form.shelfLife} onChange={e => setForm(p => ({ ...p, shelfLife: e.target.value }))} placeholder="如：30" />
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                  value={form.shelfLifeUnit}
-                  onChange={e => setForm(p => ({ ...p, shelfLifeUnit: e.target.value as 'day' | 'month' | 'year' }))}
-                >
-                  <option value="day">天</option>
-                  <option value="month">月</option>
-                  <option value="year">年</option>
-                </select>
-            </div>
-          </div>
+            <ShelfLifeField
+              value={form.shelfLife}
+              unit={form.shelfLifeUnit}
+              onValueChange={shelfLife => setForm(current => ({ ...current, shelfLife }))}
+              onUnitChange={shelfLifeUnit => setForm(current => ({ ...current, shelfLifeUnit }))}
+            />
         </div>
         )}
         <div className="rounded-lg bg-primary/5 px-3 py-2.5">

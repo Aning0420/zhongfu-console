@@ -18,6 +18,7 @@ export interface Order {
   supplier: string;
   productionDate?: string;
   shelfLife?: number; // days
+  shelfLifeUnit?: 'day' | 'month' | 'year';
   dailyUsage?: number; // average daily consumption
   /** Optional package conversion, for example 20 tablets per box. */
   packageSize?: number;
