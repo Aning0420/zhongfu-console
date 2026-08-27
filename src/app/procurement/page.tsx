@@ -47,18 +47,19 @@ const statusSortOrder: Record<Order['status'], number> = {
 };
 const chineseCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 
-function SortableHeader({ field, label, activeField, direction, onSort }: {
+function SortableHeader({ field, label, activeField, direction, onSort, className }: {
   field: SortField;
   label: string;
   activeField: SortField;
   direction: SortDirection;
   onSort: (field: SortField) => void;
+  className?: string;
 }) {
   const active = field === activeField;
   const Icon = active ? (direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
     <th
-      className="px-4 py-3 text-left font-medium text-muted-foreground"
+      className={cn('px-4 py-3 text-left font-medium text-muted-foreground', className)}
       aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
       <button
@@ -514,7 +515,14 @@ export default function ProcurementPage() {
             <table ref={tableRef} className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                <SortableHeader field="name" label="物资名称" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
+                <SortableHeader
+                  field="name"
+                  label="物资名称"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={changeSortField}
+                  className="sticky left-0 z-20 w-[172px] min-w-[172px] max-w-[172px] bg-muted shadow-[7px_0_9px_-9px_rgba(56,45,49,0.65)]"
+                />
                 <SortableHeader field="category" label="分类" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">库存</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">日均消耗</th>
@@ -546,11 +554,11 @@ export default function ProcurementPage() {
                   orderIndex > 0 ? state.orders.slice(0, orderIndex) : [],
                 );
                 return (
-                  <tr key={order.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3">
+                  <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
+                    <td className="sticky left-0 z-10 w-[172px] min-w-[172px] max-w-[172px] bg-card px-4 py-3 shadow-[7px_0_9px_-9px_rgba(56,45,49,0.65)] transition-colors group-hover:bg-muted">
                       <div className="flex items-center gap-2">
                         <Package className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <span className="font-medium text-foreground">{order.itemName}</span>
+                        <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3">
