@@ -438,7 +438,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(prev => {
       const current = prev.feedingRecords.find(record => record.id === id);
       if (!current) return prev;
-      const shouldRecalculate = ['foodName', 'amount', 'remainingAmount', 'completed']
+      const shouldRecalculate = ['foodName', 'amount', 'medication', 'remainingAmount', 'completed']
         .some(field => Object.prototype.hasOwnProperty.call(updates, field));
       if (!shouldRecalculate) {
         return {

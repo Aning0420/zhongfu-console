@@ -40,6 +40,7 @@ export function CompleteFeedingDialog({ record, onClose, onComplete }: {
           <div className="rounded-md bg-muted/45 px-3 py-2.5">
             <p className="text-sm font-medium text-foreground">{record.foodName}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">计划用量：{record.amount}</p>
+            {record.medication && <p className="mt-1 text-xs text-[#C56C5C]">用药：{record.medication}</p>}
           </div>
           <div className="space-y-2">
             <Label>喜好程度</Label>

@@ -69,7 +69,7 @@ export default function DashboardPage() {
       .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
         const remaining = order.quantity - order.consumed;
-        const observedUsage = calcDailyUsage(order.itemName, state.feedingRecords, order.unit);
+        const observedUsage = calcDailyUsage(order.itemName, state.feedingRecords, order.unit, order);
         const dailyUsage = observedUsage > 0
           ? observedUsage
           : normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);

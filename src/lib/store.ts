@@ -19,6 +19,9 @@ export interface Order {
   productionDate?: string;
   shelfLife?: number; // days
   dailyUsage?: number; // average daily consumption
+  /** Optional package conversion, for example 20 tablets per box. */
+  packageSize?: number;
+  packageUnit?: string;
 }
 
 export interface PriceHistory {
@@ -76,6 +79,7 @@ export interface FeedingRecord {
   mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   foodName: string;
   amount: string;
+  medication?: string;
   remainingAmount?: string;
   completed: boolean;
   note: string;
@@ -131,9 +135,12 @@ function hasDistinctiveOverlap(left: string, right: string, kind: string): boole
 
 function parseAmount(value?: string): ParsedAmount | null {
   const match = value?.match(AMOUNT_PATTERN);
-  if (!match) return null;
-  const amount = Number(match[1]);
-  return Number.isFinite(amount) && amount > 0 ? { value: amount, unit: match[2].toLowerCase() } : null;
+  if (match) {
+    const amount = Number(match[1]);
+    return Number.isFinite(amount) && amount > 0 ? { value: amount, unit: match[2].toLowerCase() } : null;
+  }
+  const halfMatch = value?.match(/半\s*(kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/i);
+  return halfMatch ? { value: 0.5, unit: halfMatch[1].toLowerCase() } : null;
 }
 
 function unitInfo(rawUnit: string): { family: string; factor: number; unit: string } {
@@ -151,6 +158,22 @@ export function convertInventoryAmount(value: number, fromUnit: string, toUnit: 
   const to = unitInfo(toUnit);
   if (!from.unit || !to.unit || from.family !== to.family) return null;
   return (value * from.factor) / to.factor;
+}
+
+export function convertUsageToInventoryAmount(order: Order, value: number, usageUnit: string): number | null {
+  const direct = convertInventoryAmount(value, usageUnit, order.unit);
+  if (direct !== null) return direct;
+  if (!Number.isFinite(order.packageSize) || (order.packageSize ?? 0) <= 0 || !order.packageUnit?.trim()) return null;
+  const inPackageUnit = convertInventoryAmount(value, usageUnit, order.packageUnit);
+  return inPackageUnit === null ? null : inPackageUnit / (order.packageSize as number);
+}
+
+function convertInventoryToUsageAmount(order: Order, value: number, usageUnit: string): number | null {
+  const direct = convertInventoryAmount(value, order.unit, usageUnit);
+  if (direct !== null) return direct;
+  if (!Number.isFinite(order.packageSize) || (order.packageSize ?? 0) <= 0 || !order.packageUnit?.trim()) return null;
+  const packageAmount = value * (order.packageSize as number);
+  return convertInventoryAmount(packageAmount, order.packageUnit, usageUnit);
 }
 
 /**
@@ -196,8 +219,8 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
 
   // Include legacy plan notes so measured milk powder or supplements that were
   // previously placed in notes can still participate in inventory deduction.
-  const source = `${record.foodName} ${record.amount} ${record.note}`;
-  const normalizedSource = normalizeStockProductName(`${record.foodName} ${record.note}`);
+  const source = `${record.foodName} ${record.amount} ${record.medication || ''} ${record.note}`;
+  const normalizedSource = normalizeStockProductName(`${record.foodName} ${record.medication || ''} ${record.note}`);
   const eligibleOrders = orders.filter(order =>
     ['delivered', 'shipped', 'pending'].includes(order.status)
     && order.quantity - order.consumed > 0
@@ -275,13 +298,13 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
       })
       .forEach(order => {
         if (amountLeft <= 0) return;
-        const requestedInOrderUnit = convertInventoryAmount(amountLeft, amount.unit, order.unit);
+        const requestedInOrderUnit = convertUsageToInventoryAmount(order, amountLeft, amount.unit);
         if (requestedInOrderUnit === null) return;
         const available = Math.max(0, order.quantity - order.consumed);
         const taken = Math.min(available, requestedInOrderUnit);
         if (taken <= 0) return;
         consumedByOrder.set(order.id, roundInventory((consumedByOrder.get(order.id) || 0) + taken));
-        const takenInUsageUnit = convertInventoryAmount(taken, order.unit, amount.unit) || 0;
+        const takenInUsageUnit = convertInventoryToUsageAmount(order, taken, amount.unit) || 0;
         amountLeft = Math.max(0, amountLeft - takenInUsageUnit);
       });
   });
@@ -337,7 +360,7 @@ export interface FeedingPlanStage {
   endDate: string;
   description: string; // 详细描述
   mealsPerDay: number; // 每天几顿
-  mealSchedule: { time: string; food: string; note: string }[]; // 每顿安排
+  mealSchedule: { time: string; food: string; medication?: string; note: string }[]; // 每顿安排
   supplements?: string; // 营养补充说明
 }
 
@@ -542,7 +565,7 @@ export function parseBackup(raw: string): AppState {
 }
 
 function feedingUsageAmount(itemName: string, record: FeedingRecord): ParsedAmount | null {
-  const source = `${record.foodName} ${record.note}`;
+  const source = `${record.foodName} ${record.medication || ''} ${record.note}`;
   const normalizedSource = normalizeStockProductName(source);
   const normalizedItem = normalizeStockProductName(itemName);
   const kind = stockProductKind(itemName);
@@ -582,7 +605,7 @@ function feedingUsageAmount(itemName: string, record: FeedingRecord): ParsedAmou
 }
 
 /** Calculate average consumption per observed day, optionally converted to an order's unit. */
-export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[], targetUnit?: string): number {
+export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[], targetUnit?: string, order?: Order): number {
   const usages = feedingRecords
     .filter(record => record.completed)
     .map(record => ({ record, amount: feedingUsageAmount(itemName, record) }))
@@ -591,8 +614,10 @@ export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[]
 
   const usageByDate = new Map<string, number>();
   usages.forEach(({ record, amount }) => {
-    const converted = targetUnit
-      ? convertInventoryAmount(amount.value, amount.unit, targetUnit)
+    const converted = order
+      ? convertUsageToInventoryAmount(order, amount.value, amount.unit)
+      : targetUnit
+        ? convertInventoryAmount(amount.value, amount.unit, targetUnit)
       : amount.value;
     if (converted === null || converted <= 0) return;
     usageByDate.set(record.date, (usageByDate.get(record.date) || 0) + converted);

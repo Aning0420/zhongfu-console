@@ -109,7 +109,7 @@ function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { days
 }
 
 function getDailyUsage(order: Order, feedingRecords: FeedingRecord[]): number {
-  const observedUsage = calcDailyUsage(order.itemName, feedingRecords, order.unit);
+  const observedUsage = calcDailyUsage(order.itemName, feedingRecords, order.unit, order);
   return observedUsage > 0
     ? observedUsage
     : normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
@@ -573,6 +573,9 @@ export default function ProcurementPage() {
                           {remaining}{order.unit}
                         </span>
                       </div>
+                      {order.packageSize && order.packageUnit && (
+                        <div className="mt-1 whitespace-nowrap text-[10px] text-muted-foreground">1{order.unit} = {order.packageSize}{order.packageUnit}</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                       {formatInventoryDailyUsage(dailyUsage, order.unit)}
@@ -810,6 +813,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     purchaseDate: order.purchaseDate,
     productionDate: order.productionDate || '',
     shelfLife: order.shelfLife ? String(order.shelfLife) : '',
+    packageSize: order.packageSize ? String(order.packageSize) : '',
+    packageUnit: order.packageUnit || '',
     status: order.status,
   });
   const quantity = Number(form.quantity);
@@ -817,6 +822,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
   const comparableOrders = orders.filter(item => item.id !== order.id);
   const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, comparableOrders);
+  const packageValid = (!form.packageSize && !form.packageUnit.trim())
+    || (Number.isFinite(Number(form.packageSize)) && Number(form.packageSize) > 0 && Boolean(form.packageUnit.trim()));
   const valid = Boolean(
     form.itemName.trim()
     && form.unit.trim()
@@ -825,6 +832,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     && quantity > 0
     && Number.isFinite(totalPrice)
     && totalPrice >= 0
+    && packageValid
   );
 
   const handleSave = () => {
@@ -840,6 +848,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       purchaseDate: form.purchaseDate,
       productionDate: form.productionDate || undefined,
       shelfLife: form.shelfLife ? Number(form.shelfLife) : undefined,
+      packageSize: form.packageSize ? Number(form.packageSize) : undefined,
+      packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
       status: form.status,
     });
   };
@@ -889,6 +899,15 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
               <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={event => setForm(current => ({ ...current, totalPrice: event.target.value }))} />
             </div>
           </div>
+          <div className="rounded-lg border border-border/70 p-3">
+            <Label>包装换算（可选）</Label>
+            <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+              <span className="text-sm text-muted-foreground">每{form.unit.trim() || '单位'}含</span>
+              <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：20" />
+              <Input value={form.packageUnit} onChange={event => setForm(current => ({ ...current, packageUnit: event.target.value }))} placeholder="片/粒/g" />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">例：库存按盒记录，每盒20片；完成0.5片用药会扣0.025盒。</p>
+          </div>
           {unitPrice > 0 && (
             <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
               <div className="font-medium text-foreground">自动换算：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
@@ -931,12 +950,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
     itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', syncExpense: true,
+    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as 'day' | 'month' | 'year', packageSize: '', packageUnit: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '' },
-    { id: 'bundle_2', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '' },
+    { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', packageSize: '', packageUnit: '' },
   ]);
 
   const quantity = Number(form.quantity);
@@ -955,6 +974,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       && itemQuantity > 0
       && Number.isFinite(allocatedPrice)
       && allocatedPrice >= 0
+      && ((!item.packageSize && !item.packageUnit.trim())
+        || (Number.isFinite(Number(item.packageSize)) && Number(item.packageSize) > 0 && Boolean(item.packageUnit.trim())))
     );
   });
   const bundleValid = Boolean(
@@ -992,6 +1013,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           supplier: form.supplier.trim(),
           productionDate: item.productionDate || undefined,
           shelfLife: shelfLifeInDays(item.shelfLife),
+          packageSize: item.packageSize ? Number(item.packageSize) : undefined,
+          packageUnit: item.packageSize ? item.packageUnit.trim() || undefined : undefined,
         });
       });
       if (form.syncExpense && totalPrice > 0) {
@@ -1017,7 +1040,9 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       onClose();
       return;
     }
-    if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0) return;
+    const packageValid = (!form.packageSize && !form.packageUnit.trim())
+      || (Number.isFinite(Number(form.packageSize)) && Number(form.packageSize) > 0 && Boolean(form.packageUnit.trim()));
+    if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
     onAdd({
       itemName: form.itemName.trim(),
       category: form.category,
@@ -1031,6 +1056,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       supplier: form.supplier,
       productionDate: form.productionDate || undefined,
       shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
+      packageSize: form.packageSize ? Number(form.packageSize) : undefined,
+      packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
     });
     if (form.syncExpense && totalPrice > 0) {
       addExpense({
@@ -1091,7 +1118,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                     <Input value={item.unit} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, unit: event.target.value } : entry))} placeholder="单位" />
                     <Input type="number" min="0" step="0.01" value={item.allocatedPrice} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, allocatedPrice: event.target.value } : entry))} placeholder="分摊金额(选填)" />
                   </div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-4">
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">生产日期（选填）</Label>
                       <Input type="date" value={item.productionDate} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, productionDate: event.target.value } : entry))} aria-label={`明细 ${index + 1} 生产日期`} />
@@ -1100,10 +1127,18 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                       <Label className="text-xs text-muted-foreground">保质期天数（选填）</Label>
                       <Input type="number" min="0" step="1" value={item.shelfLife} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLife: event.target.value } : entry))} placeholder="如：540" />
                     </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">每{item.unit || '单位'}内含（选填）</Label>
+                      <Input type="number" min="0" step="any" value={item.packageSize} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageSize: event.target.value } : entry))} placeholder="如：20" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">内含单位</Label>
+                      <Input value={item.packageUnit} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageUnit: event.target.value } : entry))} placeholder="片/粒/g" />
+                    </div>
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -1151,6 +1186,15 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
             <Label>本次总价(¥)</Label>
             <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={e => setForm(p => ({ ...p, totalPrice: e.target.value }))} placeholder="实付金额" />
           </div>
+        </div>
+        <div className="rounded-lg border border-border/70 p-3">
+          <Label>包装换算（可选）</Label>
+          <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+            <span className="text-sm text-muted-foreground">每{form.unit.trim() || '单位'}含</span>
+            <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：20" />
+            <Input value={form.packageUnit} onChange={event => setForm(current => ({ ...current, packageUnit: event.target.value }))} placeholder="片/粒/g" />
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">药品示例：数量1、单位盒、每盒含20片。</p>
         </div>
         {unitPrice > 0 && (
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">

@@ -317,6 +317,9 @@ export default function FeedingPage() {
                                     </span>
                                   )}
                                 </div>
+                                {record.medication && (
+                                  <p className="mt-0.5 text-xs text-[#C56C5C]">用药：{record.medication}</p>
+                                )}
                                 {conciseFeedingNote(record) && (
                                   <p className="text-xs text-muted-foreground/70 mt-0.5">{conciseFeedingNote(record)}</p>
                                 )}
@@ -458,6 +461,7 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
     mealType: 'breakfast' as FeedingRecord['mealType'],
     foodName: '',
     amount: '',
+    medication: '',
     remainingAmount: '',
     note: '',
     eatingSpeed: 'normal' as FeedingRecord['eatingSpeed'],
@@ -470,6 +474,7 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
       ...form,
       foodName: form.foodName.trim(),
       amount: form.amount.trim(),
+      medication: form.medication.trim() || undefined,
       remainingAmount: form.remainingAmount.trim() || undefined,
       note: form.note.trim(),
     });
@@ -509,6 +514,10 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
             <Label>用量</Label>
             <Input value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} placeholder="如：50g" />
           </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>用药（可选）</Label>
+          <Input value={form.medication} onChange={e => setForm(p => ({ ...p, medication: e.target.value }))} placeholder="如：速诺0.5片" />
         </div>
         <div className="space-y-1.5">
           <Label>剩余量（可选）</Label>

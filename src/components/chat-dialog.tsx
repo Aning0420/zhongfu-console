@@ -92,6 +92,7 @@ function mealMatchesSupplement(entry: ConsumableEntry, mealTime: string): boolea
   const timed = raw.match(/\b(\d{1,2}:\d{2})\b/);
   if (timed) return timed[1] === mealTime;
   const hour = Number(mealTime.slice(0, 2));
+  if (/早晚/.test(raw)) return hour < 11 || hour >= 18;
   if (/早餐|早上/.test(raw)) return hour < 11;
   if (/午餐|中午/.test(raw)) return hour >= 11 && hour < 18;
   if (/晚餐|晚上/.test(raw)) return hour >= 18;
@@ -220,6 +221,8 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           unit: String(d.unit || '个'),
           unitPrice: totalPrice / quantity,
           totalPrice,
+          packageSize: Number(d.package_size) > 0 ? Number(d.package_size) : undefined,
+          packageUnit: Number(d.package_size) > 0 ? String(d.package_unit || '').trim() || undefined : undefined,
           supplier: String(d.supplier || '线上'),
           purchaseDate: today,
           status: 'delivered',
@@ -254,6 +257,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           mealType: (String(d.meal_type) || 'snack') as 'breakfast' | 'lunch' | 'dinner' | 'snack',
           foodName: String(d.food_name || '猫粮'),
           amount: String(d.amount || ''),
+          medication: String(d.medication || '').trim() || undefined,
           remainingAmount: d.remaining_amount === undefined || d.remaining_amount === null
             ? undefined
             : String(d.remaining_amount),
@@ -273,6 +277,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
             return {
               time: String(meal.time || '08:00'),
               food: String(meal.food || '待确认食物'),
+              medication: String(meal.medication || ''),
               note: String(meal.note || ''),
             };
           });
@@ -290,9 +295,16 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
             .filter(value => value && value !== '无' && supplementPattern.test(value));
           const supplements = Array.from(new Set(sourceSupplements)).join('；');
           const stageSupplementEntries = extractConsumableEntries(String(stage.supplements || ''));
+          const medicationPattern = /(?:用药|药物|服药|口服)/;
+          const stageMedicationEntries = String(stage.description || '')
+            .split(/[；;\n]/)
+            .filter(value => medicationPattern.test(value))
+            .flatMap(value => extractConsumableEntries(value));
           const meals = parsedMeals.map(meal => {
             const noteParts = meal.note.split(/[；;\n]/).map(value => value.trim()).filter(Boolean);
-            const noteEntries = noteParts.flatMap(part => extractConsumableEntries(part));
+            const noteMedicationParts = noteParts.filter(part => medicationPattern.test(part));
+            const noteEntries = noteParts.filter(part => !medicationPattern.test(part)).flatMap(part => extractConsumableEntries(part));
+            const noteMedicationEntries = noteMedicationParts.flatMap(part => extractConsumableEntries(part));
             const timedStageEntries = stageSupplementEntries
               .filter(entry => mealMatchesSupplement(entry, meal.time))
               .map(entry => entry.item);
@@ -302,12 +314,25 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
               .filter(entry => !/\b\d{1,2}:\d{2}\b/.test(entry.raw) && !/(早餐|午餐|晚餐|早上|中午|晚上)/.test(entry.raw))
               .filter(() => parsedMeals[0]?.time === meal.time)
               .map(entry => entry.item);
+            const timedMedicationEntries = stageMedicationEntries
+              .filter(entry => mealMatchesSupplement(entry, meal.time))
+              .map(entry => entry.item);
+            const untimedMedicationEntries = stageMedicationEntries
+              .filter(entry => !/\b\d{1,2}:\d{2}\b/.test(entry.raw) && !/(早餐|午餐|晚餐|早上|中午|晚上|早晚)/.test(entry.raw))
+              .filter(() => parsedMeals[0]?.time === meal.time)
+              .map(entry => entry.item);
+            const explicitMedication = meal.medication.trim() === '无' ? '' : meal.medication.trim();
             return {
               ...meal,
               food: appendConsumables(meal.food, [
                 ...noteEntries.map(entry => entry.item),
                 ...timedStageEntries,
                 ...untimedStageEntries,
+              ]),
+              medication: appendConsumables(explicitMedication, [
+                ...noteMedicationEntries.map(entry => entry.item),
+                ...timedMedicationEntries,
+                ...untimedMedicationEntries,
               ]),
               note: noteParts
                 .flatMap(part => part.split(/[＋+、，,]/).map(value => value.trim()))
@@ -322,7 +347,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
             endDate: String(stage.end_date || stage.start_date || today),
             description: String(stage.description || ''),
             mealsPerDay: Math.max(1, meals.length),
-            mealSchedule: meals.length > 0 ? meals : [{ time: '08:00', food: '待确认食物', note: '' }],
+            mealSchedule: meals.length > 0 ? meals : [{ time: '08:00', food: '待确认食物', medication: '', note: '' }],
             supplements,
           };
         });
@@ -342,7 +367,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
             endDate: today,
             description: '请在喂食计划中补充安排',
             mealsPerDay: 1,
-            mealSchedule: [{ time: '08:00', food: '待确认食物', note: '' }],
+            mealSchedule: [{ time: '08:00', food: '待确认食物', medication: '', note: '' }],
             supplements: '',
           }],
         });

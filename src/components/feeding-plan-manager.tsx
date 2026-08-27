@@ -28,8 +28,8 @@ function createStage(index = 0): FeedingPlanStage {
     description: '',
     mealsPerDay: 2,
     mealSchedule: [
-      { time: '08:00', food: '', note: '' },
-      { time: '19:00', food: '', note: '' },
+      { time: '08:00', food: '', medication: '', note: '' },
+      { time: '19:00', food: '', medication: '', note: '' },
     ],
     supplements: '',
   };
@@ -146,7 +146,7 @@ export function FeedingPlanManager() {
                     <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
                       {stage.mealSchedule.map((meal, index) => (
                         <span key={`${stage.id}-${index}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock3 className="w-3 h-3" />{meal.time} {meal.food || '待填写'}
+                          <Clock3 className="w-3 h-3" />{meal.time} {meal.food || '待填写'}{meal.medication ? ` · 用药：${meal.medication}` : ''}
                         </span>
                       ))}
                     </div>
@@ -189,7 +189,7 @@ function PlanEditorDialog({ plan, onClose, onSave }: {
     setStages(current => current.map((stage, index) => index === stageIndex ? { ...stage, ...updates } : stage));
   };
 
-  const updateMeal = (stageIndex: number, mealIndex: number, field: 'time' | 'food' | 'note', value: string) => {
+  const updateMeal = (stageIndex: number, mealIndex: number, field: 'time' | 'food' | 'medication' | 'note', value: string) => {
     setStages(current => current.map((stage, index) => {
       if (index !== stageIndex) return stage;
       const mealSchedule = stage.mealSchedule.map((meal, indexInStage) => indexInStage === mealIndex ? { ...meal, [field]: value } : meal);
@@ -200,7 +200,7 @@ function PlanEditorDialog({ plan, onClose, onSave }: {
   const addMeal = (stageIndex: number) => {
     setStages(current => current.map((stage, index) => {
       if (index !== stageIndex) return stage;
-      const mealSchedule = [...stage.mealSchedule, { time: '12:00', food: '', note: '' }];
+      const mealSchedule = [...stage.mealSchedule, { time: '12:00', food: '', medication: '', note: '' }];
       return { ...stage, mealSchedule, mealsPerDay: mealSchedule.length };
     }));
   };
@@ -263,11 +263,16 @@ function PlanEditorDialog({ plan, onClose, onSave }: {
                     <Button variant="outline" size="sm" onClick={() => addMeal(stageIndex)}><Plus className="w-3.5 h-3.5 mr-1" />加一餐</Button>
                   </div>
                   {stage.mealSchedule.map((meal, mealIndex) => (
-                    <div key={`${stage.id}-meal-${mealIndex}`} className="grid grid-cols-[92px_minmax(0,1fr)_minmax(0,1fr)_32px] gap-2 items-center">
-                      <Input type="time" value={meal.time} onChange={event => updateMeal(stageIndex, mealIndex, 'time', event.target.value)} aria-label={`第 ${mealIndex + 1} 餐时间`} />
-                      <Input value={meal.food} onChange={event => updateMeal(stageIndex, mealIndex, 'food', event.target.value)} placeholder="食物与用量" aria-label={`第 ${mealIndex + 1} 餐食物`} />
-                      <Input value={meal.note} onChange={event => updateMeal(stageIndex, mealIndex, 'note', event.target.value)} placeholder="备注，可选" aria-label={`第 ${mealIndex + 1} 餐备注`} />
-                      <Button variant="ghost" size="icon" disabled={stage.mealSchedule.length <= 1} onClick={() => removeMeal(stageIndex, mealIndex)} className="text-destructive" title="删除餐次"><Trash2 className="w-3.5 h-3.5" /></Button>
+                    <div key={`${stage.id}-meal-${mealIndex}`} className="rounded-md border border-border/70 p-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[100px_minmax(0,1fr)_32px]">
+                        <Input type="time" value={meal.time} onChange={event => updateMeal(stageIndex, mealIndex, 'time', event.target.value)} aria-label={`第 ${mealIndex + 1} 餐时间`} />
+                        <Input value={meal.food} onChange={event => updateMeal(stageIndex, mealIndex, 'food', event.target.value)} placeholder="食物与补剂，如：处方粮10g＋益生菌1g" aria-label={`第 ${mealIndex + 1} 餐食物`} />
+                        <Button variant="ghost" size="icon" disabled={stage.mealSchedule.length <= 1} onClick={() => removeMeal(stageIndex, mealIndex)} className="text-destructive" title="删除餐次"><Trash2 className="w-3.5 h-3.5" /></Button>
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <Input value={meal.medication || ''} onChange={event => updateMeal(stageIndex, mealIndex, 'medication', event.target.value)} placeholder="用药（可选），如：速诺0.5片" aria-label={`第 ${mealIndex + 1} 餐用药`} />
+                        <Input value={meal.note} onChange={event => updateMeal(stageIndex, mealIndex, 'note', event.target.value)} placeholder="备注，如：饭后服用" aria-label={`第 ${mealIndex + 1} 餐备注`} />
+                      </div>
                     </div>
                   ))}
                 </div>

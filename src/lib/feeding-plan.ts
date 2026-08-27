@@ -47,6 +47,7 @@ export function plannedFeedingRecordsForDate(plan: FeedingPlan, date: string): O
       mealType: mealTypeForTime(meal.time),
       foodName,
       amount: planMealAmount(foodName),
+      medication: meal.medication?.trim() || undefined,
       completed: false,
       note: meal.note.trim(),
       plannedTime: meal.time,
@@ -98,6 +99,7 @@ export function reconcilePlannedFeedingRecords(
     if (
       current.planId !== planId || current.mealType !== plannedRecord.mealType
       || current.foodName !== plannedRecord.foodName || current.amount !== plannedRecord.amount
+      || current.medication !== plannedRecord.medication
       || current.note !== plannedRecord.note || current.planStageId !== plannedRecord.planStageId
     ) {
       records[index] = { ...current, ...plannedRecord };
