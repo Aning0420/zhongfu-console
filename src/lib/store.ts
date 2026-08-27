@@ -10,7 +10,7 @@ export interface Order {
   /** Amount actually paid for this purchase. Older records only have unitPrice. */
   totalPrice?: number;
   purchaseDate: string;
-  status: 'pending' | 'shipped' | 'delivered' | 'durable' | 'finished' | 'cancelled';
+  status: 'pending' | 'shipped' | 'delivered' | 'no-repurchase' | 'durable' | 'finished' | 'cancelled';
   consumed: number;
   consumedBeforeFinished?: number;
   consumedBeforeDurable?: number;
@@ -223,7 +223,7 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
   const source = `${record.foodName} ${record.amount} ${record.medication || ''} ${record.note}`;
   const normalizedSource = normalizeStockProductName(`${record.foodName} ${record.medication || ''} ${record.note}`);
   const eligibleOrders = orders.filter(order =>
-    ['delivered', 'shipped', 'pending'].includes(order.status)
+    ['delivered', 'no-repurchase', 'shipped', 'pending'].includes(order.status)
     && order.quantity - order.consumed > 0
   );
   const identitiesByKind = new Map<string, Set<string>>();

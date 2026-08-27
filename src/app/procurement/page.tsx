@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, formatInventoryDailyUsage, getPriceHistory, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -22,6 +22,7 @@ const statusMap: Record<Order['status'], { label: string; icon: React.ElementTyp
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
   shipped: { label: '运输中', icon: Truck, color: 'text-[#87CEEB] bg-[#87CEEB]/10' },
   delivered: { label: '已到货', icon: CheckCircle2, color: 'text-primary bg-primary/10' },
+  'no-repurchase': { label: '使用中·不回购', icon: BellOff, color: 'text-[#8A6A54] bg-[#8A6A54]/10' },
   durable: { label: '耐用品·无消耗', icon: Archive, color: 'text-[#52796F] bg-[#52796F]/10' },
   finished: { label: '已用完·不回购', icon: PackageCheck, color: 'text-muted-foreground bg-muted' },
   cancelled: { label: '已取消', icon: XCircle, color: 'text-muted-foreground bg-muted' },
@@ -42,9 +43,10 @@ const statusSortOrder: Record<Order['status'], number> = {
   pending: 0,
   shipped: 1,
   delivered: 2,
-  durable: 3,
-  finished: 4,
-  cancelled: 5,
+  'no-repurchase': 3,
+  durable: 4,
+  finished: 5,
+  cancelled: 6,
 };
 const chineseCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 
@@ -119,7 +121,7 @@ function expiryDaysLabel(daysLeft: number, compact = false) {
 }
 
 function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { daysLeft: number; depletionDate: string; dailyUsage: number } | null {
-  if (order.status !== 'delivered') return null;
+  if (!['delivered', 'no-repurchase'].includes(order.status)) return null;
   const remaining = order.quantity - order.consumed;
   if (remaining <= 0) {
     return { daysLeft: 0, depletionDate: localDateKey(), dailyUsage: 0 };
@@ -162,7 +164,7 @@ export default function ProcurementPage() {
 
   useEffect(() => {
     const requestedFilter = new URLSearchParams(window.location.search).get('filter');
-    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'in-progress', 'pending', 'shipped', 'delivered', 'durable', 'finished', 'cancelled'].includes(requestedFilter)) {
+    if (requestedFilter && ['low-stock', 'expiring', 'expired', 'in-progress', 'pending', 'shipped', 'delivered', 'no-repurchase', 'durable', 'finished', 'cancelled'].includes(requestedFilter)) {
       setStatusFilter(requestedFilter);
     }
   }, []);
@@ -233,8 +235,8 @@ export default function ProcurementPage() {
         const depletion = getDepletionInfo(o, state.feedingRecords);
         const stockRatio = o.quantity > 0 ? (o.quantity - o.consumed) / o.quantity : 0;
         if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
-        if (statusFilter === 'expiring' && !(o.status === 'delivered' && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
-        if (statusFilter === 'expired' && !(o.status === 'delivered' && expiry && expiry.daysLeft < 0)) return false;
+        if (statusFilter === 'expiring' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
+        if (statusFilter === 'expired' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft < 0)) return false;
         if (statusFilter === 'in-progress' && !['pending', 'shipped'].includes(o.status)) return false;
         if (!['all', 'low-stock', 'expiring', 'expired', 'in-progress'].includes(statusFilter) && o.status !== statusFilter) return false;
         if (categoryFilter !== 'all' && o.category !== categoryFilter) return false;
@@ -262,7 +264,7 @@ export default function ProcurementPage() {
         if (!info) return null;
         return { order, ...info };
       })
-      .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && item.order.status === 'delivered')
+      .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && ['delivered', 'no-repurchase'].includes(item.order.status))
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [state.orders]);
 
@@ -293,7 +295,7 @@ export default function ProcurementPage() {
     });
     // Link to procurement orders
     return state.orders
-      .filter(o => o.status === 'delivered')
+      .filter(o => ['delivered', 'no-repurchase'].includes(o.status))
       .map(order => {
         const food = order.itemName;
         const stats = foodMap.get(food);
@@ -307,7 +309,7 @@ export default function ProcurementPage() {
 
   const summary = useMemo(() => {
     const stockValue = state.orders
-      .filter(o => o.status === 'delivered' || o.status === 'durable')
+      .filter(o => ['delivered', 'no-repurchase', 'durable'].includes(o.status))
       .reduce((sum, order) => sum + Math.max(0, order.quantity - order.consumed) * order.unitPrice, 0);
     const lowStock = state.orders.filter(order => {
       if (order.status !== 'delivered' || order.repurchasedAt) return false;
@@ -498,6 +500,7 @@ export default function ProcurementPage() {
             <SelectItem value="pending">待发货</SelectItem>
             <SelectItem value="shipped">运输中</SelectItem>
             <SelectItem value="delivered">已到货</SelectItem>
+            <SelectItem value="no-repurchase">使用中·不回购</SelectItem>
             <SelectItem value="durable">耐用品·无消耗</SelectItem>
             <SelectItem value="finished">已用完·不回购</SelectItem>
             <SelectItem value="cancelled">已取消</SelectItem>
@@ -664,7 +667,7 @@ export default function ProcurementPage() {
                         <Select
                           value=""
                           onValueChange={mode => setStockAdjustment({ order, mode: mode as 'consume' | 'restore' })}
-                          disabled={order.status !== 'delivered' || (remaining <= 0 && order.consumed <= 0)}
+                          disabled={!['delivered', 'no-repurchase'].includes(order.status) || (remaining <= 0 && order.consumed <= 0)}
                         >
                           <SelectTrigger size="sm" className="w-[104px]" aria-label={`调整${order.itemName}的库存`}>
                             <SelectValue placeholder="库存操作" />

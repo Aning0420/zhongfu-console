@@ -54,7 +54,7 @@ export default function DashboardPage() {
     // Expiring items (within 7 days)
     const expiringItems = state.orders
       .map(order => {
-        if (!order.productionDate || !order.shelfLife || order.status !== 'delivered') return null;
+        if (!order.productionDate || !order.shelfLife || !['delivered', 'no-repurchase'].includes(order.status)) return null;
         const prod = new Date(`${order.productionDate}T00:00:00Z`);
         const expiry = new Date(prod.getTime() + order.shelfLife * 24 * 60 * 60 * 1000);
         const daysLeft = Math.round((expiry.getTime() - new Date(`${today}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1000));
@@ -132,7 +132,7 @@ export default function DashboardPage() {
         id: o.id,
         icon: ShoppingCart,
         color: 'text-accent',
-        text: `采购${o.itemName} ${o.status === 'delivered' ? '已到货' : o.status === 'shipped' ? '运输中' : o.status === 'durable' ? '耐用品·无消耗' : o.status === 'finished' ? '已用完·不回购' : o.status === 'cancelled' ? '已取消' : '待发货'}`,
+        text: `采购${o.itemName} ${o.status === 'delivered' ? '已到货' : o.status === 'shipped' ? '运输中' : o.status === 'no-repurchase' ? '使用中·不回购' : o.status === 'durable' ? '耐用品·无消耗' : o.status === 'finished' ? '已用完·不回购' : o.status === 'cancelled' ? '已取消' : '待发货'}`,
         time: o.purchaseDate,
       });
     });
