@@ -212,6 +212,10 @@ function roundInventory(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+export function inventoryRemaining(order: Order): number {
+  return roundInventory(Math.max(0, order.quantity - order.consumed));
+}
+
 export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]): {
   orders: Order[];
   deductions: InventoryDeduction[];
@@ -224,7 +228,7 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
   const normalizedSource = normalizeStockProductName(`${record.foodName} ${record.medication || ''} ${record.note}`);
   const eligibleOrders = orders.filter(order =>
     ['delivered', 'no-repurchase', 'shipped', 'pending'].includes(order.status)
-    && order.quantity - order.consumed > 0
+    && inventoryRemaining(order) > 0
   );
   const identitiesByKind = new Map<string, Set<string>>();
   eligibleOrders.forEach(order => {
@@ -301,7 +305,7 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
         if (amountLeft <= 0) return;
         const requestedInOrderUnit = convertUsageToInventoryAmount(order, amountLeft, amount.unit);
         if (requestedInOrderUnit === null) return;
-        const available = Math.max(0, order.quantity - order.consumed);
+        const available = inventoryRemaining(order);
         const taken = Math.min(available, requestedInOrderUnit);
         if (taken <= 0) return;
         consumedByOrder.set(order.id, roundInventory((consumedByOrder.get(order.id) || 0) + taken));

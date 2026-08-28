@@ -24,7 +24,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
+import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, inventoryRemaining, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
 
 export default function DashboardPage() {
@@ -68,7 +68,7 @@ export default function DashboardPage() {
     const repurchaseItems = state.orders
       .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
-        const remaining = order.quantity - order.consumed;
+        const remaining = inventoryRemaining(order);
         const observedUsage = calcDailyUsage(order.itemName, state.feedingRecords, order.unit, order);
         const dailyUsage = observedUsage > 0
           ? observedUsage

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Expense } from '@/lib/store';
-import { calcDailyUsage, formatInventoryDailyUsage, getPriceHistory, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
+import { calcDailyUsage, formatInventoryDailyUsage, getPriceHistory, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
 import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
@@ -122,7 +122,7 @@ function expiryDaysLabel(daysLeft: number, compact = false) {
 
 function getDepletionInfo(order: Order, feedingRecords: FeedingRecord[]): { daysLeft: number; depletionDate: string; dailyUsage: number } | null {
   if (!['delivered', 'no-repurchase'].includes(order.status)) return null;
-  const remaining = order.quantity - order.consumed;
+  const remaining = inventoryRemaining(order);
   if (remaining <= 0) {
     return { daysLeft: 0, depletionDate: localDateKey(), dailyUsage: 0 };
   }
@@ -233,7 +233,7 @@ export default function ProcurementPage() {
       .filter(o => {
         const expiry = getExpiryInfo(o);
         const depletion = getDepletionInfo(o, state.feedingRecords);
-        const stockRatio = o.quantity > 0 ? (o.quantity - o.consumed) / o.quantity : 0;
+        const stockRatio = o.quantity > 0 ? inventoryRemaining(o) / o.quantity : 0;
         if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
         if (statusFilter === 'expiring' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
         if (statusFilter === 'expired' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft < 0)) return false;
@@ -310,10 +310,10 @@ export default function ProcurementPage() {
   const summary = useMemo(() => {
     const stockValue = state.orders
       .filter(o => ['delivered', 'no-repurchase', 'durable'].includes(o.status))
-      .reduce((sum, order) => sum + Math.max(0, order.quantity - order.consumed) * order.unitPrice, 0);
+      .reduce((sum, order) => sum + inventoryRemaining(order) * order.unitPrice, 0);
     const lowStock = state.orders.filter(order => {
       if (order.status !== 'delivered' || order.repurchasedAt) return false;
-      const ratio = order.quantity > 0 ? (order.quantity - order.consumed) / order.quantity : 0;
+      const ratio = order.quantity > 0 ? inventoryRemaining(order) / order.quantity : 0;
       const depletion = getDepletionInfo(order, state.feedingRecords);
       return ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7);
     }).length;
@@ -359,7 +359,7 @@ export default function ProcurementPage() {
                 <div className="flex items-center gap-2">
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">{order.itemName}</span>
-                  <span className="text-xs text-muted-foreground">{order.quantity - order.consumed}{order.unit} 剩余</span>
+                  <span className="text-xs text-muted-foreground">{inventoryRemaining(order)}{order.unit} 剩余</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">到期 {expiryDate}</span>
@@ -387,7 +387,7 @@ export default function ProcurementPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">{order.itemName}</span>
-                  <span className="text-xs text-muted-foreground">剩余 {order.quantity - order.consumed}{order.unit}</span>
+                  <span className="text-xs text-muted-foreground">剩余 {inventoryRemaining(order)}{order.unit}</span>
                   <span className="text-xs text-muted-foreground">· 日均消耗 {formatInventoryDailyUsage(dailyUsage, order.unit)}</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -565,7 +565,7 @@ export default function ProcurementPage() {
             </thead>
             <tbody>
               {filteredOrders.map(order => {
-                const remaining = order.quantity - order.consumed;
+                const remaining = inventoryRemaining(order);
                 const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
@@ -758,7 +758,7 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
   onClose: () => void;
   onConfirm: (amount: number) => void;
 }) {
-  const remaining = Math.max(0, order.quantity - order.consumed);
+  const remaining = inventoryRemaining(order);
   const maximum = mode === 'consume' ? remaining : order.consumed;
   const configuredUsage = normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
   const suggested = mode === 'consume' && configuredUsage > 0
@@ -768,7 +768,10 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
   const parsedAmount = Number(amount);
   const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount <= maximum;
   const verb = mode === 'consume' ? '领用' : '退回';
-  const afterRemaining = mode === 'consume' ? remaining - parsedAmount : remaining + parsedAmount;
+  const afterRemaining = inventoryRemaining({
+    ...order,
+    consumed: mode === 'consume' ? order.consumed + parsedAmount : order.consumed - parsedAmount,
+  });
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>

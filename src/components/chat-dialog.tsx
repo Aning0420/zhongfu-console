@@ -5,7 +5,7 @@ import { normalizeInventoryCategory } from '@/lib/inventory-categories';
 import { X, Send, ImagePlus, Trash2, Sparkles } from 'lucide-react';
 import { useAppContext } from './providers';
 import { cn } from '@/lib/utils';
-import type { AppState, CareReminder, DailyObservation } from '@/lib/store';
+import { inventoryRemaining, type AppState, type CareReminder, type DailyObservation } from '@/lib/store';
 import { localDateKey } from '@/lib/local-date';
 
 interface DisplayMessage {
@@ -113,9 +113,9 @@ function buildAssistantContext(state: AppState): string {
   const activePlan = state.feedingPlans.find(plan => plan.active);
   const activeStage = activePlan?.stages.find(stage => stage.startDate <= today && stage.endDate >= today);
   const inventory = state.orders
-    .filter(order => order.status !== 'cancelled' && order.status !== 'finished' && order.quantity - order.consumed > 0)
+    .filter(order => order.status !== 'cancelled' && order.status !== 'finished' && inventoryRemaining(order) > 0)
     .slice(-20)
-    .map(order => ({ item: order.itemName, category: order.category, remaining: order.quantity - order.consumed, unit: order.unit }));
+    .map(order => ({ item: order.itemName, category: order.category, remaining: inventoryRemaining(order), unit: order.unit }));
   const recentHealth = [...state.healthRecords]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 8)
