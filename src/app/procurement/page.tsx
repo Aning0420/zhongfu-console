@@ -4,19 +4,22 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAppContext } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import Image from 'next/image';
 import type { Expense } from '@/lib/store';
-import { calcDailyUsage, formatInventoryDailyUsage, getPriceHistory, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff } from 'lucide-react';
+import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
+import { analyzeProductImage, compressProductImage, type ProductImageAnalysis } from '@/lib/product-image';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -584,9 +587,17 @@ export default function ProcurementPage() {
                   <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
                     <td className="sticky left-0 z-10 w-[172px] min-w-[172px] max-w-[172px] bg-card px-4 py-3 shadow-[7px_0_9px_-9px_rgba(56,45,49,0.65)] transition-colors group-hover:bg-muted">
                       <div className="flex items-center gap-2">
-                        <Package className="w-4 h-4 text-muted-foreground shrink-0" />
+                        {order.imageUrl ? (
+                          <Image src={order.imageUrl} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
+                        ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
                         <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
+                      {(order.productBenefits || order.suitableLifeStages || order.feedingGuidance) && (
+                        <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground" title={order.productBenefits || order.feedingGuidance}>
+                          {order.productBenefits || order.feedingGuidance}
+                          {order.suitableLifeStages ? ` · ${order.suitableLifeStages}` : ''}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <Select value={order.category} onValueChange={category => updateOrderCategory(order.id, category)}>
@@ -682,6 +693,9 @@ export default function ProcurementPage() {
                             <ShoppingCart className="h-3.5 w-3.5" />已回购
                           </Button>
                         )}
+                        <Button variant="ghost" size="icon-sm" onClick={() => openFeedingPlanDraft(order)} title="用商品资料编辑喂食计划" aria-label={`用${order.itemName}编辑喂食计划`}>
+                          <Utensils className="h-3.5 w-3.5" />
+                        </Button>
                         <Button variant="ghost" size="icon-sm" onClick={() => setEditingOrder(order)} title="编辑采购记录" aria-label={`编辑${order.itemName}`}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -759,18 +773,29 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
   onConfirm: (amount: number) => void;
 }) {
   const remaining = inventoryRemaining(order);
-  const maximum = mode === 'consume' ? remaining : order.consumed;
+  const hasSecondaryUnit = Boolean(order.packageSize && order.packageUnit);
+  const [inputUnit, setInputUnit] = useState(order.unit);
+  const maximumInPrimaryUnit = mode === 'consume' ? remaining : order.consumed;
+  const maximum = inputUnit === order.unit || !hasSecondaryUnit
+    ? maximumInPrimaryUnit
+    : convertInventoryToUsageAmount(order, maximumInPrimaryUnit, order.packageUnit as string) || 0;
   const configuredUsage = normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
-  const suggested = mode === 'consume' && configuredUsage > 0
-    ? Math.min(configuredUsage, maximum)
-    : Math.min(1, maximum);
+  const suggestedInPrimaryUnit = mode === 'consume' && configuredUsage > 0
+    ? Math.min(configuredUsage, maximumInPrimaryUnit)
+    : Math.min(1, maximumInPrimaryUnit);
+  const suggested = inputUnit === order.unit || !hasSecondaryUnit
+    ? suggestedInPrimaryUnit
+    : convertInventoryToUsageAmount(order, suggestedInPrimaryUnit, order.packageUnit as string) || 0;
   const [amount, setAmount] = useState(String(suggested));
   const parsedAmount = Number(amount);
-  const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount <= maximum;
+  const parsedInPrimaryUnit = inputUnit === order.unit || !hasSecondaryUnit
+    ? parsedAmount
+    : convertUsageToInventoryAmount(order, parsedAmount, inputUnit) || 0;
+  const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedInPrimaryUnit > 0 && parsedInPrimaryUnit <= maximumInPrimaryUnit;
   const verb = mode === 'consume' ? '领用' : '退回';
   const afterRemaining = inventoryRemaining({
     ...order,
-    consumed: mode === 'consume' ? order.consumed + parsedAmount : order.consumed - parsedAmount,
+    consumed: mode === 'consume' ? order.consumed + parsedInPrimaryUnit : order.consumed - parsedInPrimaryUnit,
   });
 
   return (
@@ -785,14 +810,26 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
             <p className="text-xs text-muted-foreground mt-1">当前可用 {remaining}{order.unit}，已领用 {order.consumed}{order.unit}</p>
           </div>
           <div className="space-y-1.5">
-            <Label>本次{verb}数量（{order.unit}）</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>本次{verb}数量</Label>
+              {hasSecondaryUnit && (
+                <Select value={inputUnit} onValueChange={nextUnit => { setInputUnit(nextUnit); setAmount(''); }}>
+                  <SelectTrigger className="h-8 w-[120px]" aria-label="选择库存操作单位"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={order.unit}>{order.unit}（库存）</SelectItem>
+                    <SelectItem value={order.packageUnit as string}>{order.packageUnit}（每{order.unit}{order.packageSize}{order.packageUnit}）</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
             <Input type="number" min="0" max={maximum} step="any" value={amount} onChange={event => setAmount(event.target.value)} autoFocus />
             {!valid && amount !== '' && <p className="text-xs text-destructive">数量必须大于 0，且不能超过{mode === 'consume' ? '当前库存' : '已领用数量'}。</p>}
+            {hasSecondaryUnit && <p className="text-xs text-muted-foreground">当前可用约 {maximum}{inputUnit}；确认后会换算成库存单位保存。</p>}
           </div>
           <p className="text-xs text-muted-foreground">确认后剩余 {valid ? afterRemaining : remaining}{order.unit}，补货提醒会自动重算。</p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose}>取消</Button>
-            <Button disabled={!valid} onClick={() => onConfirm(parsedAmount)} className="bg-primary text-primary-foreground hover:bg-primary/90">确认{verb}</Button>
+            <Button disabled={!valid} onClick={() => onConfirm(parsedInPrimaryUnit)} className="bg-primary text-primary-foreground hover:bg-primary/90">确认{verb}</Button>
           </div>
         </div>
       </DialogContent>
@@ -860,6 +897,139 @@ function ShelfLifeField({ value, unit, onValueChange, onUnitChange, label = '保
   );
 }
 
+function ProductImageField({ imageUrl, onChange, onAnalysis }: {
+  imageUrl?: string;
+  onChange: (value?: string) => void;
+  onAnalysis: (analysis: ProductImageAnalysis) => void;
+}) {
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState('');
+  const inputId = React.useId();
+
+  const handleFile = async (file: File) => {
+    setError('');
+    try {
+      onChange(await compressProductImage(file));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '图片读取失败');
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!imageUrl || analyzing) return;
+    setAnalyzing(true);
+    setError('');
+    try {
+      onAnalysis(await analyzeProductImage(imageUrl));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '图片识别失败');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border/70 p-3">
+      <div className="flex items-start gap-3">
+        {imageUrl ? (
+          <Image src={imageUrl} alt="商品包装图" width={72} height={72} unoptimized className="h-[72px] w-[72px] shrink-0 rounded-md border border-border object-cover" />
+        ) : (
+          <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><ImagePlus className="h-5 w-5" /></div>
+        )}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <Label>商品图片（可选）</Label>
+            <p className="mt-1 text-xs text-muted-foreground">拍清包装正面、规格和配料表，图片会压缩后保存在记录中。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <input id={inputId} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void handleFile(file); event.target.value = ''; }} />
+            <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById(inputId)?.click()}>
+              <ImagePlus className="h-3.5 w-3.5" />{imageUrl ? '更换图片' : '添加图片'}
+            </Button>
+            {imageUrl && <Button type="button" variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
+              {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
+              {analyzing ? '识别中…' : '识别并填充资料'}
+            </Button>}
+            {imageUrl && <Button type="button" variant="ghost" size="sm" onClick={() => onChange(undefined)}>移除</Button>}
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, onChange }: {
+  benefits: string;
+  suitableLifeStages: string;
+  feedingGuidance: string;
+  onChange: (field: 'productBenefits' | 'suitableLifeStages' | 'feedingGuidance', value: string) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-lg border border-border/70 p-3">
+      <div>
+        <Label>商品资料（可选）</Label>
+        <p className="mt-1 text-xs text-muted-foreground">可由图片识别填入，也可以自己修改。功效仅作包装信息记录，不替代兽医建议。</p>
+      </div>
+      <div className="space-y-1.5">
+        <Label>功效 / 用途</Label>
+        <Textarea value={benefits} onChange={event => onChange('productBenefits', event.target.value)} placeholder="如：完整营养主食、补充水分、日常营养支持" rows={2} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>适合的猫咪阶段</Label>
+        <Input value={suitableLifeStages} onChange={event => onChange('suitableLifeStages', event.target.value)} placeholder="如：幼猫、成猫、恢复期（以包装和兽医意见为准）" />
+      </div>
+      <div className="space-y-1.5">
+        <Label>喂食 / 使用提示</Label>
+        <Textarea value={feedingGuidance} onChange={event => onChange('feedingGuidance', event.target.value)} placeholder="如：每日建议量、是否需要泡软、用药剂量等" rows={2} />
+      </div>
+    </div>
+  );
+}
+
+function openFeedingPlanDraft(order: Order) {
+  const details = [
+    `商品：${order.itemName}`,
+    order.category ? `分类：${order.category}` : '',
+    order.productBenefits ? `功效/用途：${order.productBenefits}` : '',
+    order.suitableLifeStages ? `适合阶段：${order.suitableLifeStages}` : '',
+    order.feedingGuidance ? `喂食提示：${order.feedingGuidance}` : '',
+    order.packageSize && order.packageUnit ? `包装换算：1${order.unit}=${order.packageSize}${order.packageUnit}` : '',
+  ].filter(Boolean).join('\n');
+  window.dispatchEvent(new CustomEvent('zhongfu-chat-draft', {
+    detail: `请根据以下采购商品资料，帮我编辑当前喂食计划。先结合钟福当前年龄、体重、健康状态和现有计划判断是否适合，再给出需要新增或替换的餐次和用量。不要擅自改变兽医已经给出的药物剂量；不确定的地方先问我。\n\n${details}`,
+  }));
+}
+
+function applyProductAnalysis<T extends {
+  itemName: string;
+  category: string;
+  quantity: string;
+  unit: string;
+  totalPrice: string;
+  supplier: string;
+  packageSize: string;
+  packageUnit: string;
+  productBenefits: string;
+  suitableLifeStages: string;
+  feedingGuidance: string;
+}>(current: T, analysis: ProductImageAnalysis): T {
+  return {
+    ...current,
+    itemName: analysis.itemName || current.itemName,
+    category: analysis.category || current.category,
+    quantity: analysis.quantity ? String(analysis.quantity) : current.quantity,
+    unit: analysis.unit || current.unit,
+    totalPrice: analysis.totalPrice !== undefined ? String(analysis.totalPrice) : current.totalPrice,
+    supplier: analysis.supplier || current.supplier,
+    packageSize: analysis.packageSize ? String(analysis.packageSize) : current.packageSize,
+    packageUnit: analysis.packageUnit || current.packageUnit,
+    productBenefits: analysis.productBenefits || current.productBenefits,
+    suitableLifeStages: analysis.suitableLifeStages || current.suitableLifeStages,
+    feedingGuidance: analysis.feedingGuidance || current.feedingGuidance,
+  };
+}
+
 function EditOrderDialog({ order, orders, onClose, onSave }: {
   order: Order;
   orders: Order[];
@@ -880,6 +1050,10 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     shelfLifeUnit: initialShelfLife.unit,
     packageSize: order.packageSize ? String(order.packageSize) : '',
     packageUnit: order.packageUnit || '',
+    imageUrl: order.imageUrl || '',
+    productBenefits: order.productBenefits || '',
+    suitableLifeStages: order.suitableLifeStages || '',
+    feedingGuidance: order.feedingGuidance || '',
     status: order.status,
   });
   const quantity = Number(form.quantity);
@@ -916,6 +1090,10 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
+      imageUrl: form.imageUrl || undefined,
+      productBenefits: form.productBenefits.trim() || undefined,
+      suitableLifeStages: form.suitableLifeStages.trim() || undefined,
+      feedingGuidance: form.feedingGuidance.trim() || undefined,
       status: form.status,
     });
   };
@@ -927,10 +1105,21 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           <DialogTitle>编辑采购记录</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-1">
+          <ProductImageField
+            imageUrl={form.imageUrl || undefined}
+            onChange={imageUrl => setForm(current => ({ ...current, imageUrl: imageUrl || '' }))}
+            onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
+          />
           <div className="space-y-1.5">
             <Label>物资名称</Label>
             <Input value={form.itemName} onChange={event => setForm(current => ({ ...current, itemName: event.target.value }))} />
           </div>
+          <ProductInfoFields
+            benefits={form.productBenefits}
+            suitableLifeStages={form.suitableLifeStages}
+            feedingGuidance={form.feedingGuidance}
+            onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
+          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>分类</Label>
@@ -1018,7 +1207,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
     itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '', syncExpense: true,
+    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '',
+    imageUrl: '', productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
@@ -1121,6 +1311,10 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
+      imageUrl: form.imageUrl || undefined,
+      productBenefits: form.productBenefits.trim() || undefined,
+      suitableLifeStages: form.suitableLifeStages.trim() || undefined,
+      feedingGuidance: form.feedingGuidance.trim() || undefined,
     });
     if (form.syncExpense && totalPrice > 0) {
       addExpense({
@@ -1218,6 +1412,11 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           </>
         ) : (
           <>
+        <ProductImageField
+          imageUrl={form.imageUrl || undefined}
+          onChange={imageUrl => setForm(current => ({ ...current, imageUrl: imageUrl || '' }))}
+          onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
+        />
         <div className="space-y-1.5">
           <Label>物资名称</Label>
           <Input value={form.itemName} onChange={e => setForm(p => ({ ...p, itemName: e.target.value }))} placeholder="如：皇家猫粮 K36" />
@@ -1290,6 +1489,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
             />
         </div>
         )}
+        <ProductInfoFields
+          benefits={form.productBenefits}
+          suitableLifeStages={form.suitableLifeStages}
+          feedingGuidance={form.feedingGuidance}
+          onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
+        />
         <div className="rounded-lg bg-primary/5 px-3 py-2.5">
           <p className="text-xs text-muted-foreground">💡 日均消耗量将根据喂食记录自动学习计算，无需手动填写。喂食记录越多，估算越准确。</p>
         </div>

@@ -7,6 +7,7 @@ import {
   loadState,
   parseBackup,
   restoreInventoryDeductions,
+  roundInventory,
   saveState,
   type AppState,
   type Order,
@@ -392,9 +393,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const order = prev.orders.find(item => item.id === id);
       if (!order) return prev;
 
-      const consumed = mode === 'consume'
+      const consumed = roundInventory(mode === 'consume'
         ? Math.min(order.quantity, order.consumed + amount)
-        : Math.max(0, order.consumed - amount);
+        : Math.max(0, order.consumed - amount));
 
       return {
         ...prev,

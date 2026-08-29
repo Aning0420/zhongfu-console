@@ -23,6 +23,12 @@ export interface Order {
   /** Optional package conversion, for example 20 tablets per box. */
   packageSize?: number;
   packageUnit?: string;
+  /** Compressed product/package photo stored with the local record. */
+  imageUrl?: string;
+  /** AI or manually recorded product information. */
+  productBenefits?: string;
+  suitableLifeStages?: string;
+  feedingGuidance?: string;
 }
 
 export interface PriceHistory {
@@ -169,7 +175,7 @@ export function convertUsageToInventoryAmount(order: Order, value: number, usage
   return inPackageUnit === null ? null : inPackageUnit / (order.packageSize as number);
 }
 
-function convertInventoryToUsageAmount(order: Order, value: number, usageUnit: string): number | null {
+export function convertInventoryToUsageAmount(order: Order, value: number, usageUnit: string): number | null {
   const direct = convertInventoryAmount(value, order.unit, usageUnit);
   if (direct !== null) return direct;
   if (!Number.isFinite(order.packageSize) || (order.packageSize ?? 0) <= 0 || !order.packageUnit?.trim()) return null;
@@ -208,7 +214,7 @@ export function formatInventoryDailyUsage(value: number, unit: string): string {
   return `${rounded(value)}${unit}/天`;
 }
 
-function roundInventory(value: number): number {
+export function roundInventory(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 

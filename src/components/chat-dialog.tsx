@@ -115,7 +115,15 @@ function buildAssistantContext(state: AppState): string {
   const inventory = state.orders
     .filter(order => order.status !== 'cancelled' && order.status !== 'finished' && inventoryRemaining(order) > 0)
     .slice(-20)
-    .map(order => ({ item: order.itemName, category: order.category, remaining: inventoryRemaining(order), unit: order.unit }));
+    .map(order => ({
+      item: order.itemName,
+      category: order.category,
+      remaining: inventoryRemaining(order),
+      unit: order.unit,
+      productBenefits: order.productBenefits,
+      suitableLifeStages: order.suitableLifeStages,
+      feedingGuidance: order.feedingGuidance,
+    }));
   const recentHealth = [...state.healthRecords]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 8)
@@ -181,6 +189,15 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }, [messages]);
 
+  useEffect(() => {
+    const receiveDraft = (event: Event) => {
+      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt;
+      if (prompt) setInput(prompt);
+    };
+    window.addEventListener('zhongfu-chat-draft', receiveDraft);
+    return () => window.removeEventListener('zhongfu-chat-draft', receiveDraft);
+  }, []);
+
   // Handle image file selection
   const handleImageSelect = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -223,6 +240,9 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           totalPrice,
           packageSize: Number(d.package_size) > 0 ? Number(d.package_size) : undefined,
           packageUnit: Number(d.package_size) > 0 ? String(d.package_unit || '').trim() || undefined : undefined,
+          productBenefits: String(d.product_benefits || '').trim() || undefined,
+          suitableLifeStages: String(d.suitable_life_stages || '').trim() || undefined,
+          feedingGuidance: String(d.feeding_guidance || '').trim() || undefined,
           supplier: String(d.supplier || '线上'),
           purchaseDate: today,
           status: 'delivered',

@@ -25,6 +25,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setSidebarCollapsed(window.matchMedia('(max-width: 640px)').matches);
   }, []);
 
+  useEffect(() => {
+    const openChatDraft = () => setChatOpen(true);
+    window.addEventListener('zhongfu-chat-draft', openChatDraft);
+    return () => window.removeEventListener('zhongfu-chat-draft', openChatDraft);
+  }, []);
+
   const setSidebarVisibility = (collapsed: boolean) => {
     setSidebarCollapsed(collapsed);
     localStorage.setItem('zhongfu-sidebar-collapsed', String(collapsed));

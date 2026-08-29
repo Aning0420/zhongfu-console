@@ -34,7 +34,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 ---SYNC_DATA_END---
 
 可用数据类型和字段：
-- procurement: item_name, category, quantity, unit, total_price(本次实付总价), supplier
+- procurement: item_name, category, quantity, unit, package_size, package_unit, total_price(本次实付总价), supplier, product_benefits, suitable_life_stages, feeding_guidance
 - expense: category, amount, description, note
 - feeding: meal_type(breakfast/lunch/dinner/snack), food_name, amount, remaining_amount(可选), note
 - feeding_plan: name, active, stages；stage 包含 name,start_date,end_date,description,meals,supplements；meal 包含 time,food,note
@@ -56,6 +56,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 - 采购分类只能选择：${CATEGORIES.join('、')}。
 - 采购中的 total_price 是整次购买的实付总额，不是单价；例如“1.8kg共109元”应提取 quantity=1.8、unit=kg、total_price=109。采购会由应用自动同步支出，不要再额外生成 expense。
 - 不确定主食或零食时先追问，不要只凭包装形态判断。
+- 识别商品图片时，可根据包装可见信息填写 product_benefits、suitable_life_stages、feeding_guidance；不确定就留空，不要把包装宣称当成医疗诊断。
 - 医疗问题给出谨慎建议，并在紧急症状时提示尽快联系兽医。`;
 
 const FEEDING_PLAN_SCHEMA = {
