@@ -13,13 +13,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import Image from 'next/image';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
-import { analyzeProductImage, compressProductImage, type ProductImageAnalysis } from '@/lib/product-image';
+import { analyzeProductImages, compressProductImage, type ProductImageAnalysis } from '@/lib/product-image';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -587,8 +587,8 @@ export default function ProcurementPage() {
                   <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
                     <td className="sticky left-0 z-10 w-[172px] min-w-[172px] max-w-[172px] bg-card px-4 py-3 shadow-[7px_0_9px_-9px_rgba(56,45,49,0.65)] transition-colors group-hover:bg-muted">
                       <div className="flex items-center gap-2">
-                        {order.imageUrl ? (
-                          <Image src={order.imageUrl} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
+                        {(order.imageUrls?.[0] || order.imageUrl) ? (
+                          <Image src={order.imageUrls?.[0] || order.imageUrl || ''} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
                         ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
                         <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
@@ -897,30 +897,40 @@ function ShelfLifeField({ value, unit, onValueChange, onUnitChange, label = '保
   );
 }
 
-function ProductImageField({ imageUrl, onChange, onAnalysis }: {
-  imageUrl?: string;
-  onChange: (value?: string) => void;
+const MAX_PRODUCT_IMAGES = 4;
+
+function ProductImageField({ imageUrls, onChange, onAnalysis }: {
+  imageUrls: string[];
+  onChange: (value: string[]) => void;
   onAnalysis: (analysis: ProductImageAnalysis) => void;
 }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState('');
   const inputId = React.useId();
 
-  const handleFile = async (file: File) => {
+  const handleFiles = async (files: File[]) => {
     setError('');
+    const remainingSlots = MAX_PRODUCT_IMAGES - imageUrls.length;
+    if (remainingSlots <= 0) {
+      setError(`每条记录最多保存 ${MAX_PRODUCT_IMAGES} 张图片`);
+      return;
+    }
+    const selectedFiles = files.slice(0, remainingSlots);
     try {
-      onChange(await compressProductImage(file));
+      const compressed = await Promise.all(selectedFiles.map(file => compressProductImage(file)));
+      onChange(Array.from(new Set([...imageUrls, ...compressed])).slice(0, MAX_PRODUCT_IMAGES));
+      if (files.length > remainingSlots) setError(`已添加前 ${remainingSlots} 张，每条记录最多 ${MAX_PRODUCT_IMAGES} 张`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '图片读取失败');
     }
   };
 
   const handleAnalyze = async () => {
-    if (!imageUrl || analyzing) return;
+    if (!imageUrls.length || analyzing) return;
     setAnalyzing(true);
     setError('');
     try {
-      onAnalysis(await analyzeProductImage(imageUrl));
+      onAnalysis(await analyzeProductImages(imageUrls));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '图片识别失败');
     } finally {
@@ -930,31 +940,54 @@ function ProductImageField({ imageUrl, onChange, onAnalysis }: {
 
   return (
     <div className="rounded-lg border border-border/70 p-3">
-      <div className="flex items-start gap-3">
-        {imageUrl ? (
-          <Image src={imageUrl} alt="商品包装图" width={72} height={72} unoptimized className="h-[72px] w-[72px] shrink-0 rounded-md border border-border object-cover" />
-        ) : (
+      <div>
+        <Label>商品图片（可选）</Label>
+        <p className="mt-1 text-xs text-muted-foreground">最多 {MAX_PRODUCT_IMAGES} 张，可一次多选；采购列表只显示第一张，识别时会读取全部图片。</p>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {imageUrls.map((imageUrl, index) => (
+          <div key={`${imageUrl.slice(-24)}-${index}`} className="relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-md border border-border bg-muted">
+            <Image src={imageUrl} alt={`商品包装图 ${index + 1}`} fill sizes="72px" unoptimized className="object-cover" />
+            {index === 0 ? (
+              <span className="absolute bottom-1 left-1 rounded bg-foreground/75 px-1.5 py-0.5 text-[10px] text-background">首图</span>
+            ) : (
+              <button
+                type="button"
+                aria-label={`将第 ${index + 1} 张设为首图`}
+                title="设为首图"
+                onClick={() => onChange([imageUrl, ...imageUrls.filter((_, imageIndex) => imageIndex !== index)])}
+                className="absolute bottom-1 left-1 flex h-6 w-6 items-center justify-center rounded bg-background/90 text-foreground shadow-sm hover:bg-background"
+              >
+                <Star className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label={`移除第 ${index + 1} 张图片`}
+              title="移除图片"
+              onClick={() => onChange(imageUrls.filter((_, imageIndex) => imageIndex !== index))}
+              className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded bg-background/90 text-destructive shadow-sm hover:bg-background"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+        {!imageUrls.length && (
           <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><ImagePlus className="h-5 w-5" /></div>
         )}
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <Label>商品图片（可选）</Label>
-            <p className="mt-1 text-xs text-muted-foreground">拍清包装正面、规格和配料表，图片会压缩后保存在记录中。</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <input id={inputId} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void handleFile(file); event.target.value = ''; }} />
-            <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById(inputId)?.click()}>
-              <ImagePlus className="h-3.5 w-3.5" />{imageUrl ? '更换图片' : '添加图片'}
-            </Button>
-            {imageUrl && <Button type="button" variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
-              {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
-              {analyzing ? '识别中…' : '识别并填充资料'}
-            </Button>}
-            {imageUrl && <Button type="button" variant="ghost" size="sm" onClick={() => onChange(undefined)}>移除</Button>}
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
       </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <input id={inputId} type="file" accept="image/*" multiple className="hidden" onChange={event => { const files = Array.from(event.target.files || []); if (files.length) void handleFiles(files); event.target.value = ''; }} />
+        <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById(inputId)?.click()} disabled={imageUrls.length >= MAX_PRODUCT_IMAGES}>
+          <ImagePlus className="h-3.5 w-3.5" />添加图片
+        </Button>
+        {imageUrls.length > 0 && <Button type="button" variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
+          {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
+          {analyzing ? '识别中…' : `识别全部 ${imageUrls.length} 张`}
+        </Button>}
+        {imageUrls.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={() => onChange([])}>全部移除</Button>}
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -1050,7 +1083,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     shelfLifeUnit: initialShelfLife.unit,
     packageSize: order.packageSize ? String(order.packageSize) : '',
     packageUnit: order.packageUnit || '',
-    imageUrl: order.imageUrl || '',
+    imageUrls: order.imageUrls?.length ? order.imageUrls : order.imageUrl ? [order.imageUrl] : [],
     productBenefits: order.productBenefits || '',
     suitableLifeStages: order.suitableLifeStages || '',
     feedingGuidance: order.feedingGuidance || '',
@@ -1090,7 +1123,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
-      imageUrl: form.imageUrl || undefined,
+      imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
+      imageUrl: form.imageUrls[0] || undefined,
       productBenefits: form.productBenefits.trim() || undefined,
       suitableLifeStages: form.suitableLifeStages.trim() || undefined,
       feedingGuidance: form.feedingGuidance.trim() || undefined,
@@ -1106,8 +1140,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
         </DialogHeader>
         <div className="space-y-4 pt-1">
           <ProductImageField
-            imageUrl={form.imageUrl || undefined}
-            onChange={imageUrl => setForm(current => ({ ...current, imageUrl: imageUrl || '' }))}
+            imageUrls={form.imageUrls}
+            onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
             onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
           />
           <div className="space-y-1.5">
@@ -1208,7 +1242,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [form, setForm] = useState({
     itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '',
-    imageUrl: '', productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
+    imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
@@ -1311,7 +1345,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
-      imageUrl: form.imageUrl || undefined,
+      imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
+      imageUrl: form.imageUrls[0] || undefined,
       productBenefits: form.productBenefits.trim() || undefined,
       suitableLifeStages: form.suitableLifeStages.trim() || undefined,
       feedingGuidance: form.feedingGuidance.trim() || undefined,
@@ -1413,8 +1448,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         ) : (
           <>
         <ProductImageField
-          imageUrl={form.imageUrl || undefined}
-          onChange={imageUrl => setForm(current => ({ ...current, imageUrl: imageUrl || '' }))}
+          imageUrls={form.imageUrls}
+          onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
           onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
         />
         <div className="space-y-1.5">

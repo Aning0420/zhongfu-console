@@ -23,7 +23,9 @@ export interface Order {
   /** Optional package conversion, for example 20 tablets per box. */
   packageSize?: number;
   packageUnit?: string;
-  /** Compressed product/package photo stored with the local record. */
+  /** Compressed product/package photos. The first item is the cover image. */
+  imageUrls?: string[];
+  /** Legacy cover field retained for older clients and backups. */
   imageUrl?: string;
   /** AI or manually recorded product information. */
   productBenefits?: string;
@@ -577,7 +579,22 @@ function migrateLegacyDemoData(state: AppState): AppState {
   const removedExpenseIds = new Set(['e1', 'e2']);
   return {
     ...state,
-    orders: state.orders.filter(order => !removedOrderIds.has(order.id)),
+    orders: state.orders
+      .filter(order => !removedOrderIds.has(order.id))
+      .map(order => {
+        const storedImages = Array.isArray(order.imageUrls)
+          ? order.imageUrls.filter(image => typeof image === 'string' && Boolean(image.trim()))
+          : [];
+        const legacyImage = typeof order.imageUrl === 'string' && order.imageUrl.trim()
+          ? order.imageUrl.trim()
+          : '';
+        const imageUrls = Array.from(new Set([...storedImages, legacyImage].filter(Boolean))).slice(0, 4);
+        return {
+          ...order,
+          imageUrls: imageUrls.length ? imageUrls : undefined,
+          imageUrl: imageUrls[0] || undefined,
+        };
+      }),
     expenses: state.expenses.filter(expense => !removedExpenseIds.has(expense.id)),
   };
 }

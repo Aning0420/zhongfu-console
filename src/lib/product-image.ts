@@ -30,7 +30,7 @@ export function compressProductImage(file: File): Promise<string> {
       const image = new Image();
       image.onerror = () => reject(new Error('图片格式无法读取'));
       image.onload = () => {
-        const maxSide = 1000;
+        const maxSide = 900;
         const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -43,7 +43,7 @@ export function compressProductImage(file: File): Promise<string> {
         context.fillStyle = '#ffffff';
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.78));
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
       };
       image.src = source;
     };
@@ -141,4 +141,29 @@ export async function analyzeProductImage(image: string): Promise<ProductImageAn
     suitableLifeStages: stringValue(data.suitable_life_stages),
     feedingGuidance: stringValue(data.feeding_guidance),
   };
+}
+
+/** Read all saved package photos, keeping the first photo's values when images disagree. */
+export async function analyzeProductImages(images: string[]): Promise<ProductImageAnalysis> {
+  const results = await Promise.allSettled(images.map(image => analyzeProductImage(image)));
+  const successful = results
+    .filter((result): result is PromiseFulfilledResult<ProductImageAnalysis> => result.status === 'fulfilled')
+    .map(result => result.value);
+  if (successful.length === 0) {
+    const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    throw firstFailure?.reason instanceof Error ? firstFailure.reason : new Error('图片识别失败');
+  }
+  return successful.reduce<ProductImageAnalysis>((combined, current) => ({
+    itemName: combined.itemName || current.itemName,
+    category: combined.category || current.category,
+    quantity: combined.quantity || current.quantity,
+    unit: combined.unit || current.unit,
+    packageSize: combined.packageSize || current.packageSize,
+    packageUnit: combined.packageUnit || current.packageUnit,
+    totalPrice: combined.totalPrice ?? current.totalPrice,
+    supplier: combined.supplier || current.supplier,
+    productBenefits: combined.productBenefits || current.productBenefits,
+    suitableLifeStages: combined.suitableLifeStages || current.suitableLifeStages,
+    feedingGuidance: combined.feedingGuidance || current.feedingGuidance,
+  }), {});
 }
