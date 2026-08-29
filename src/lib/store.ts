@@ -448,8 +448,6 @@ export interface AppBackup {
 }
 
 const defaultOrders: Order[] = [
-  { id: 'o1', itemName: '皇家猫粮 K36', category: '猫粮', quantity: 10, unit: 'kg', unitPrice: 89, purchaseDate: '2025-08-01', status: 'delivered', consumed: 4, supplier: '宠粮旗舰店', productionDate: '2025-07-01', shelfLife: 365, dailyUsage: 0.1 },
-  { id: 'o2', itemName: '妙鲜包金枪鱼味', category: '主食餐包', quantity: 24, unit: '包', unitPrice: 8.5, purchaseDate: '2025-08-05', status: 'delivered', consumed: 12, supplier: '宠粮旗舰店', productionDate: '2025-06-15', shelfLife: 180, dailyUsage: 0.5 },
   { id: 'o3', itemName: '猫砂豆腐砂', category: '猫砂与清洁', quantity: 6, unit: '袋', unitPrice: 35, purchaseDate: '2025-08-10', status: 'shipped', consumed: 2, supplier: '喵星人生活馆', productionDate: '2025-07-20', shelfLife: 730, dailyUsage: 0.15 },
   { id: 'o4', itemName: '化毛膏营养膏', category: '保健品', quantity: 2, unit: '支', unitPrice: 68, purchaseDate: '2025-08-12', status: 'pending', consumed: 0, supplier: '宠物健康屋', productionDate: '2025-05-01', shelfLife: 90, dailyUsage: 0.05 },
   { id: 'o5', itemName: '逗猫棒套装', category: '玩具', quantity: 1, unit: '套', unitPrice: 45, purchaseDate: '2025-08-15', status: 'delivered', consumed: 0, supplier: '喵星人生活馆' },
@@ -483,8 +481,6 @@ const defaultHealthRecords: HealthRecord[] = [
 ];
 
 const defaultExpenses: Expense[] = [
-  { id: 'e1', date: '2025-08-01', category: '主粮', amount: 890, description: '皇家猫粮 K36 10kg', relatedModule: 'procurement' },
-  { id: 'e2', date: '2025-08-05', category: '零食', amount: 204, description: '妙鲜包24包', relatedModule: 'procurement' },
   { id: 'e3', date: '2025-08-10', category: '日用', amount: 210, description: '猫砂6袋', relatedModule: 'procurement' },
   { id: 'e4', date: '2025-08-12', category: '保健品', amount: 136, description: '化毛膏2支', relatedModule: 'procurement' },
   { id: 'e5', date: '2025-08-15', category: '玩具', amount: 45, description: '逗猫棒套装', relatedModule: 'procurement' },
@@ -505,7 +501,7 @@ export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as AppState;
+      const parsed = migrateLegacyDemoData(JSON.parse(raw) as AppState);
       // Migration: add chatMessages if missing from old data
       if (!parsed.chatMessages) {
         parsed.chatMessages = defaultChatMessages;
@@ -565,13 +561,24 @@ export function parseBackup(raw: string): AppState {
     throw new Error('备份文件缺少必要的数据');
   }
 
-  return {
+  return migrateLegacyDemoData({
     orders: candidate.orders as Order[],
     feedingRecords: candidate.feedingRecords as FeedingRecord[],
     feedingPlans: Array.isArray(candidate.feedingPlans) ? candidate.feedingPlans as FeedingPlan[] : [],
     healthRecords: candidate.healthRecords as HealthRecord[],
     expenses: candidate.expenses as Expense[],
     chatMessages: Array.isArray(candidate.chatMessages) ? candidate.chatMessages as ChatMessage[] : [],
+  });
+}
+
+/** Remove only the two original seeded rows the user previously deleted. */
+function migrateLegacyDemoData(state: AppState): AppState {
+  const removedOrderIds = new Set(['o1', 'o2']);
+  const removedExpenseIds = new Set(['e1', 'e2']);
+  return {
+    ...state,
+    orders: state.orders.filter(order => !removedOrderIds.has(order.id)),
+    expenses: state.expenses.filter(expense => !removedExpenseIds.has(expense.id)),
   };
 }
 
