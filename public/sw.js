@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'zhongfu-v26';
+const CACHE_VERSION = 'zhongfu-v27';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
