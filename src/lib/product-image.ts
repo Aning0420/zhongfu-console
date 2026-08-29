@@ -32,18 +32,34 @@ export function compressProductImage(file: File): Promise<string> {
       image.onload = () => {
         const maxSide = 900;
         const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-        const context = canvas.getContext('2d');
-        if (!context) {
-          resolve(source);
-          return;
+        let width = Math.max(1, Math.round(image.naturalWidth * scale));
+        let height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const render = (quality: number) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext('2d');
+          if (!context) return source;
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+          return canvas.toDataURL('image/jpeg', quality);
+        };
+
+        // Four photos still need to fit inside the 2MB cloud snapshot limit.
+        const maxDataUrlLength = 300_000;
+        let quality = 0.7;
+        let result = render(quality);
+        while (result.length > maxDataUrlLength && quality > 0.46) {
+          quality -= 0.08;
+          result = render(quality);
         }
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        while (result.length > maxDataUrlLength && Math.max(width, height) > 520) {
+          width = Math.max(1, Math.round(width * 0.84));
+          height = Math.max(1, Math.round(height * 0.84));
+          result = render(0.54);
+        }
+        resolve(result);
       };
       image.src = source;
     };
