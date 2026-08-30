@@ -437,15 +437,32 @@ const worker = {
 
       let result: unknown;
       if (body.image) {
-        const visionResult = await env.AI.run(VISION_MODEL, {
-          task: 'query',
-          image: validateImage(body.image),
-          question: '请仔细查看图片，用中文客观描述其中可见的猫咪、物品、包装文字、票据或健康信息。不要猜测看不清的内容。',
-          reasoning: false,
-          stream: false,
-          max_tokens: 800,
-        });
-        const imageDescription = getText(visionResult);
+        const image = validateImage(body.image);
+        const imageQuestion = [
+          `The user's request is: ${latest.slice(0, 2_000)}`,
+          'Inspect the actual image and answer the request using only visible evidence. Transcribe readable brand names, product names, Chinese text, quantities, units, prices, life stages, and feeding instructions exactly as printed. Explicitly leave unreadable or absent fields blank. Do not repeat the request, infer missing details, or claim that you cannot view the image.',
+        ].join('\n\n');
+        const [queryResult, captionResult] = await Promise.all([
+          env.AI.run(VISION_MODEL, {
+            task: 'query',
+            image,
+            question: imageQuestion,
+            reasoning: false,
+            stream: false,
+            max_tokens: 800,
+          }),
+          env.AI.run(VISION_MODEL, {
+            task: 'caption',
+            image,
+            caption_length: 'long',
+            stream: false,
+            max_tokens: 800,
+          }),
+        ]);
+        const imageDescription = [getText(queryResult), getText(captionResult)]
+          .map(value => value.trim())
+          .filter(Boolean)
+          .join('\n\n');
         result = await env.AI.run(TEXT_MODEL, {
           messages: [
             { role: 'system', content: contextualPrompt },
