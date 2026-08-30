@@ -34,7 +34,7 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 ---SYNC_DATA_END---
 
 可用数据类型和字段：
-- procurement: item_name, category, quantity, unit, package_size, package_unit, total_price(本次实付总价), supplier, product_benefits, suitable_life_stages, feeding_guidance
+- procurement: item_name(具体物品名或口味), item_group(系列/大标题，可空), category, quantity, unit, package_size, package_unit, total_price(本次实付总价), supplier, product_benefits, suitable_life_stages, feeding_guidance
 - expense: category, amount, description, note
 - feeding: meal_type(breakfast/lunch/dinner/snack), food_name, amount, remaining_amount(可选), note
 - feeding_plan: name, active, stages；stage 包含 name,start_date,end_date,description,meals,supplements；meal 包含 time,food,note

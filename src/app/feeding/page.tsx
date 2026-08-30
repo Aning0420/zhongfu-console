@@ -15,6 +15,7 @@ import { FeedingPlanManager } from '@/components/feeding-plan-manager';
 import { CompleteFeedingDialog } from '@/components/complete-feeding-dialog';
 import { plannedFeedingRecordsForDate, stageForDate } from '@/lib/feeding-plan';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
+import { InventoryFoodInput } from '@/components/inventory-food-input';
 
 const mealIcons = {
   breakfast: Coffee,
@@ -69,6 +70,12 @@ export default function FeedingPage() {
   }, [state.feedingRecords]);
 
   const todayRecords = recordsByDate[selectedDate] || [];
+  const foodSuggestions = useMemo(() => Array.from(new Set(
+    state.orders
+      .filter(order => !['cancelled', 'finished', 'durable'].includes(order.status))
+      .map(order => [order.itemGroup, order.itemName].filter(Boolean).join(' · ').trim())
+      .filter(Boolean)
+  )), [state.orders]);
   const activePlan = state.feedingPlans.find(plan => plan.active);
   const activeStage = activePlan ? stageForDate(activePlan.stages, selectedDate) : undefined;
 
@@ -128,7 +135,7 @@ export default function FeedingPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 记录喂食
             </Button>
           </DialogTrigger>
-          <AddFeedingDialog key={selectedDate} defaultDate={selectedDate} onClose={() => setShowAdd(false)} onAdd={addFeedingRecord} />
+          <AddFeedingDialog key={selectedDate} defaultDate={selectedDate} foodSuggestions={foodSuggestions} onClose={() => setShowAdd(false)} onAdd={addFeedingRecord} />
         </Dialog>}
       </div>
 
@@ -439,7 +446,7 @@ export default function FeedingPage() {
             })()}
           </div>
         </div>
-      </div> : <FeedingPlanManager />}
+      </div> : <FeedingPlanManager foodSuggestions={foodSuggestions} />}
       {completingRecord && (
         <CompleteFeedingDialog
           key={completingRecord.id}
@@ -455,7 +462,7 @@ export default function FeedingPage() {
   );
 }
 
-function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string; onClose: () => void; onAdd: (record: Omit<FeedingRecord, 'id'>) => void }) {
+function AddFeedingDialog({ defaultDate, foodSuggestions, onClose, onAdd }: { defaultDate: string; foodSuggestions: string[]; onClose: () => void; onAdd: (record: Omit<FeedingRecord, 'id'>) => void }) {
   const [form, setForm] = useState({
     date: defaultDate,
     mealType: 'breakfast' as FeedingRecord['mealType'],
@@ -508,7 +515,7 @@ function AddFeedingDialog({ defaultDate, onClose, onAdd }: { defaultDate: string
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>食物名称</Label>
-            <Input value={form.foodName} onChange={e => setForm(p => ({ ...p, foodName: e.target.value }))} placeholder="如：皇家猫粮" />
+            <InventoryFoodInput value={form.foodName} onChange={foodName => setForm(p => ({ ...p, foodName }))} suggestions={foodSuggestions} placeholder="输入关键词，选择采购登记名称" />
           </div>
           <div className="space-y-1.5">
             <Label>用量</Label>

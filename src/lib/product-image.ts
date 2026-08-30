@@ -2,6 +2,7 @@ import { normalizeInventoryCategory } from '@/lib/inventory-categories';
 
 export interface ProductImageAnalysis {
   itemName?: string;
+  itemGroup?: string;
   category?: string;
   quantity?: number;
   unit?: string;
@@ -146,6 +147,7 @@ export async function analyzeProductImage(image: string): Promise<ProductImageAn
   const data = parsed.data;
   return {
     itemName: stringValue(data.item_name),
+    itemGroup: stringValue(data.item_group),
     category: data.category ? normalizeInventoryCategory(data.category) : undefined,
     quantity: numberValue(data.quantity),
     unit: stringValue(data.unit),
@@ -171,6 +173,7 @@ export async function analyzeProductImages(images: string[]): Promise<ProductIma
   }
   return successful.reduce<ProductImageAnalysis>((combined, current) => ({
     itemName: combined.itemName || current.itemName,
+    itemGroup: combined.itemGroup || current.itemGroup,
     category: combined.category || current.category,
     quantity: combined.quantity || current.quantity,
     unit: combined.unit || current.unit,

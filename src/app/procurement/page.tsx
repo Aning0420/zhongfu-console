@@ -243,12 +243,12 @@ export default function ProcurementPage() {
         if (statusFilter === 'in-progress' && !['pending', 'shipped'].includes(o.status)) return false;
         if (!['all', 'low-stock', 'expiring', 'expired', 'in-progress'].includes(statusFilter) && o.status !== statusFilter) return false;
         if (categoryFilter !== 'all' && o.category !== categoryFilter) return false;
-        if (search && !o.itemName.includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
+        if (search && !o.itemName.includes(search) && !(o.itemGroup || '').includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
         return true;
       })
       .sort((a, b) => {
         let comparison = 0;
-        if (sortField === 'name') comparison = chineseCollator.compare(a.itemName, b.itemName);
+        if (sortField === 'name') comparison = chineseCollator.compare(`${a.itemGroup || ''}${a.itemName}`, `${b.itemGroup || ''}${b.itemName}`);
         if (sortField === 'category') comparison = chineseCollator.compare(a.category, b.category);
         if (sortField === 'purchaseDate') comparison = a.purchaseDate.localeCompare(b.purchaseDate);
         if (sortField === 'status') comparison = statusSortOrder[a.status] - statusSortOrder[b.status];
@@ -474,7 +474,7 @@ export default function ProcurementPage() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="搜索物资名称、分类、供应商..."
+            placeholder="搜索系列、物资名称、分类、供应商..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-9 bg-card"
@@ -567,7 +567,7 @@ export default function ProcurementPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.map(order => {
+              {filteredOrders.map((order, visibleIndex) => {
                 const remaining = inventoryRemaining(order);
                 const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
@@ -576,17 +576,19 @@ export default function ProcurementPage() {
                 const depletion = getDepletionInfo(order, state.feedingRecords);
                 const needsRestock = order.status === 'delivered' && !order.repurchasedAt
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
-                const orderIndex = state.orders.findIndex(item => item.id === order.id);
+                const sourceOrderIndex = state.orders.findIndex(item => item.id === order.id);
+                const showGroupHeading = Boolean(order.itemGroup && filteredOrders[visibleIndex - 1]?.itemGroup !== order.itemGroup);
                 const priceHistory = getPriceHistory(
                   order.itemName,
                   order.unit,
                   order.unitPrice,
-                  orderIndex > 0 ? state.orders.slice(0, orderIndex) : [],
+                  sourceOrderIndex > 0 ? state.orders.slice(0, sourceOrderIndex) : [],
                 );
                 return (
                   <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
                     <td className="sticky left-0 z-10 w-[172px] min-w-[172px] max-w-[172px] bg-card px-4 py-3 shadow-[7px_0_9px_-9px_rgba(56,45,49,0.65)] transition-colors group-hover:bg-muted">
-                      <div className="flex items-center gap-2">
+                      {showGroupHeading && <div className="mb-1 text-xs font-semibold text-primary" title={order.itemGroup}>{order.itemGroup}</div>}
+                      <div className={cn('flex items-center gap-2', order.itemGroup && 'pl-2')}>
                         {(order.imageUrls?.[0] || order.imageUrl) ? (
                           <Image src={order.imageUrls?.[0] || order.imageUrl || ''} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
                         ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
@@ -1023,6 +1025,7 @@ function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, onCh
 function openFeedingPlanDraft(order: Order) {
   const details = [
     `商品：${order.itemName}`,
+    order.itemGroup ? `系列：${order.itemGroup}` : '',
     order.category ? `分类：${order.category}` : '',
     order.productBenefits ? `功效/用途：${order.productBenefits}` : '',
     order.suitableLifeStages ? `适合阶段：${order.suitableLifeStages}` : '',
@@ -1036,6 +1039,7 @@ function openFeedingPlanDraft(order: Order) {
 
 function applyProductAnalysis<T extends {
   itemName: string;
+  itemGroup: string;
   category: string;
   quantity: string;
   unit: string;
@@ -1050,6 +1054,7 @@ function applyProductAnalysis<T extends {
   return {
     ...current,
     itemName: analysis.itemName || current.itemName,
+    itemGroup: analysis.itemGroup || current.itemGroup,
     category: analysis.category || current.category,
     quantity: analysis.quantity ? String(analysis.quantity) : current.quantity,
     unit: analysis.unit || current.unit,
@@ -1072,6 +1077,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   const initialShelfLife = shelfLifeForEditing(order.shelfLife, order.shelfLifeUnit);
   const [form, setForm] = useState({
     itemName: order.itemName,
+    itemGroup: order.itemGroup || '',
     category: order.category,
     quantity: String(order.quantity),
     unit: order.unit,
@@ -1111,6 +1117,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     if (!valid) return;
     onSave({
       itemName: form.itemName.trim(),
+      itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
       quantity,
       unit: form.unit.trim(),
@@ -1144,6 +1151,10 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
             onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
             onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
           />
+          <div className="space-y-1.5">
+            <Label>物资系列 / 大标题（可选）</Label>
+            <Input value={form.itemGroup} onChange={event => setForm(current => ({ ...current, itemGroup: event.target.value }))} placeholder="如：原切冻干" />
+          </div>
           <div className="space-y-1.5">
             <Label>物资名称</Label>
             <Input value={form.itemName} onChange={event => setForm(current => ({ ...current, itemName: event.target.value }))} />
@@ -1240,14 +1251,14 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
-    itemName: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
+    itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '',
     imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
-    { id: 'bundle_2', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
+    { id: 'bundle_1', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
   ]);
 
   const quantity = Number(form.quantity);
@@ -1287,6 +1298,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
         onAdd({
           itemName: item.itemName.trim(),
+          itemGroup: item.itemGroup.trim() || undefined,
           category: item.category,
           quantity: itemQuantity,
           unit: item.unit.trim(),
@@ -1331,6 +1343,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
     onAdd({
       itemName: form.itemName.trim(),
+      itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
       quantity,
       unit: form.unit.trim() || '件',
@@ -1400,8 +1413,11 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                       </Button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.4fr)_130px_80px_80px_110px]">
-                    <Input value={item.itemName} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemName: event.target.value } : entry))} placeholder="商品名称/口味" />
+                  <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Input value={item.itemGroup} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemGroup: event.target.value } : entry))} placeholder="系列/大标题，如：原切冻干" />
+                    <Input value={item.itemName} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemName: event.target.value } : entry))} placeholder="具体名称/口味，如：厚切鸭胸肉" />
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[130px_80px_80px_minmax(0,1fr)]">
                     <Select value={item.category} onValueChange={category => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, category } : entry))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent><InventoryCategoryOptions /></SelectContent>
@@ -1433,7 +1449,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageSize: '', packageUnit: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -1452,6 +1468,10 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
           onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
         />
+        <div className="space-y-1.5">
+          <Label>物资系列 / 大标题（可选）</Label>
+          <Input value={form.itemGroup} onChange={e => setForm(p => ({ ...p, itemGroup: e.target.value }))} placeholder="如：原切冻干" />
+        </div>
         <div className="space-y-1.5">
           <Label>物资名称</Label>
           <Input value={form.itemName} onChange={e => setForm(p => ({ ...p, itemName: e.target.value }))} placeholder="如：皇家猫粮 K36" />

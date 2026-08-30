@@ -3,6 +3,8 @@ import { localDateKey } from '@/lib/local-date';
 export interface Order {
   id: string;
   itemName: string;
+  /** Optional series/group heading shared by related flavors or variants. */
+  itemGroup?: string;
   category: string;
   quantity: number;
   unit: string;

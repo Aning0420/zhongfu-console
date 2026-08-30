@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import type { FeedingPlan, FeedingPlanStage } from '@/lib/store';
 import { localDateKey } from '@/lib/local-date';
+import { InventoryFoodInput } from '@/components/inventory-food-input';
 
 function dateAfter(days: number) {
   const date = new Date();
@@ -45,7 +46,7 @@ function clonePlan(plan: FeedingPlan): FeedingPlan {
   };
 }
 
-export function FeedingPlanManager() {
+export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?: string[] }) {
   const { state, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan } = useAppContext();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<FeedingPlan | null>(null);
@@ -168,6 +169,7 @@ export function FeedingPlanManager() {
         <PlanEditorDialog
           key={editingPlan?.id || 'new-plan'}
           plan={editingPlan}
+          foodSuggestions={foodSuggestions}
           onClose={() => setEditorOpen(false)}
           onSave={savePlan}
         />
@@ -176,8 +178,9 @@ export function FeedingPlanManager() {
   );
 }
 
-function PlanEditorDialog({ plan, onClose, onSave }: {
+function PlanEditorDialog({ plan, foodSuggestions, onClose, onSave }: {
   plan: FeedingPlan | null;
+  foodSuggestions: string[];
   onClose: () => void;
   onSave: (plan: Omit<FeedingPlan, 'id' | 'createdAt'>) => void;
 }) {
@@ -266,7 +269,7 @@ function PlanEditorDialog({ plan, onClose, onSave }: {
                     <div key={`${stage.id}-meal-${mealIndex}`} className="rounded-md border border-border/70 p-3">
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-[100px_minmax(0,1fr)_32px]">
                         <Input type="time" value={meal.time} onChange={event => updateMeal(stageIndex, mealIndex, 'time', event.target.value)} aria-label={`第 ${mealIndex + 1} 餐时间`} />
-                        <Input value={meal.food} onChange={event => updateMeal(stageIndex, mealIndex, 'food', event.target.value)} placeholder="食物与补剂，如：处方粮10g＋益生菌1g" aria-label={`第 ${mealIndex + 1} 餐食物`} />
+                        <InventoryFoodInput value={meal.food} onChange={value => updateMeal(stageIndex, mealIndex, 'food', value)} suggestions={foodSuggestions} placeholder="输入关键词，选择采购登记名称" ariaLabel={`第 ${mealIndex + 1} 餐食物`} />
                         <Button variant="ghost" size="icon" disabled={stage.mealSchedule.length <= 1} onClick={() => removeMeal(stageIndex, mealIndex)} className="text-destructive" title="删除餐次"><Trash2 className="w-3.5 h-3.5" /></Button>
                       </div>
                       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">

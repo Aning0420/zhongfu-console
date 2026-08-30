@@ -233,6 +233,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           : Number(d.total_price) || 0;
         addOrder({
           itemName: String(d.item_name || '未知物品'),
+          itemGroup: String(d.item_group || '').trim() || undefined,
           category: normalizeInventoryCategory(d.category),
           quantity,
           unit: String(d.unit || '个'),
