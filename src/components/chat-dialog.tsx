@@ -137,6 +137,17 @@ function buildAssistantContext(state: AppState): string {
 
   return JSON.stringify({
     today,
+    cats: state.cats.map(cat => ({
+      name: cat.name,
+      sex: cat.sex,
+      birthday: cat.birthday,
+      ageNote: cat.ageNote,
+      weight: cat.weight,
+      color: cat.color,
+      origin: cat.origin,
+      notes: cat.notes,
+      active: cat.id === state.activeCatId,
+    })),
     latestWeight: latestWeight ? { date: latestWeight.date, kg: latestWeight.weight } : null,
     activeFeedingPlan: activePlan ? {
       name: activePlan.name,

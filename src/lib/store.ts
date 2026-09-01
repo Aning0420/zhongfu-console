@@ -433,7 +433,22 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface CatProfile {
+  id: string;
+  name: string;
+  sex?: 'male' | 'female' | 'unknown';
+  birthday?: string;
+  ageNote?: string;
+  weight?: number;
+  color?: string;
+  origin?: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface AppState {
+  cats: CatProfile[];
+  activeCatId?: string;
   orders: Order[];
   feedingRecords: FeedingRecord[];
   feedingPlans: FeedingPlan[];
@@ -498,9 +513,41 @@ const defaultChatMessages: ChatMessage[] = [
   { id: 'c0', role: 'assistant', content: '你好！我是钟福的专属助手，有什么可以帮你的吗？你可以问我关于喂食、支出、健康等方面的问题。', timestamp: new Date().toISOString() },
 ];
 
+const defaultCats: CatProfile[] = [
+  {
+    id: 'cat-zhongfu',
+    name: '钟福',
+    ageNote: '约两个半月（捡到的流浪猫，年龄待确认）',
+    weight: 1.15,
+    origin: '救助的流浪猫',
+    notes: '正在进行猫瘟康复照护。',
+    createdAt: '2026-08-24T00:00:00.000Z',
+  },
+  {
+    id: 'cat-qiyu',
+    name: '七遇',
+    origin: '新救助的猫咪',
+    notes: '档案刚建立，年龄、体重和健康情况待补充。',
+    createdAt: '2026-09-01T00:00:00.000Z',
+  },
+];
+
+function initialAppState(): AppState {
+  return {
+    cats: defaultCats,
+    activeCatId: 'cat-zhongfu',
+    orders: defaultOrders,
+    feedingRecords: defaultFeedingRecords,
+    feedingPlans: [],
+    healthRecords: defaultHealthRecords,
+    expenses: defaultExpenses,
+    chatMessages: defaultChatMessages,
+  };
+}
+
 export function loadState(): AppState {
   if (typeof window === 'undefined') {
-    return { orders: defaultOrders, feedingRecords: defaultFeedingRecords, feedingPlans: [], healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
+    return initialAppState();
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -513,7 +560,7 @@ export function loadState(): AppState {
       return parsed;
     }
   } catch { /* ignore */ }
-  const initial = { orders: defaultOrders, feedingRecords: defaultFeedingRecords, feedingPlans: [], healthRecords: defaultHealthRecords, expenses: defaultExpenses, chatMessages: defaultChatMessages };
+  const initial = initialAppState();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
   return initial;
 }
@@ -566,6 +613,8 @@ export function parseBackup(raw: string): AppState {
   }
 
   return migrateLegacyDemoData({
+    cats: Array.isArray(candidate.cats) ? candidate.cats as CatProfile[] : [],
+    activeCatId: typeof candidate.activeCatId === 'string' ? candidate.activeCatId : undefined,
     orders: candidate.orders as Order[],
     feedingRecords: candidate.feedingRecords as FeedingRecord[],
     feedingPlans: Array.isArray(candidate.feedingPlans) ? candidate.feedingPlans as FeedingPlan[] : [],
@@ -579,8 +628,20 @@ export function parseBackup(raw: string): AppState {
 function migrateLegacyDemoData(state: AppState): AppState {
   const removedOrderIds = new Set(['o1', 'o2']);
   const removedExpenseIds = new Set(['e1', 'e2']);
+  const existingCats = Array.isArray(state.cats)
+    ? state.cats.filter(cat => isRecord(cat) && typeof cat.id === 'string' && typeof cat.name === 'string')
+    : [];
+  const cats = [
+    ...(existingCats.some(cat => cat.id === 'cat-zhongfu' || cat.name === '钟福') ? [] : [defaultCats[0]]),
+    ...existingCats,
+    ...(existingCats.some(cat => cat.id === 'cat-qiyu' || cat.name === '七遇') ? [] : [defaultCats[1]]),
+  ];
   return {
     ...state,
+    cats,
+    activeCatId: state.activeCatId && cats.some(cat => cat.id === state.activeCatId)
+      ? state.activeCatId
+      : cats[0]?.id,
     orders: state.orders
       .filter(order => !removedOrderIds.has(order.id))
       .map(order => {

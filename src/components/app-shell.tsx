@@ -8,12 +8,14 @@ import { ChatDialog } from '@/components/chat-dialog';
 import { QuickEntryDialog } from '@/components/quick-entry-dialog';
 import { PwaRegister } from '@/components/pwa-register';
 import { LocalDataDialog } from '@/components/local-data-dialog';
+import { CatProfileDialog } from '@/components/cat-profile-dialog';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [chatOpen, setChatOpen] = useState(false);
   const [quickEntryOpen, setQuickEntryOpen] = useState(false);
   const [localDataOpen, setLocalDataOpen] = useState(false);
+  const [catProfileOpen, setCatProfileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -46,6 +48,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onOpenQuickEntry={() => setQuickEntryOpen(true)}
             onOpenChat={() => setChatOpen(true)}
             onOpenLocalData={() => setLocalDataOpen(true)}
+            onOpenCats={() => setCatProfileOpen(true)}
           />
         )}
         {sidebarCollapsed && (
@@ -59,6 +62,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <ChatDialog open={chatOpen} onClose={() => setChatOpen(false)} />
         <QuickEntryDialog open={quickEntryOpen} onOpenChange={setQuickEntryOpen} />
         <LocalDataDialog open={localDataOpen} onClose={() => setLocalDataOpen(false)} />
+        <CatProfileDialog open={catProfileOpen} onOpenChange={setCatProfileOpen} />
       </div>
     </AppProvider>
   );

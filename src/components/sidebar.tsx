@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { CirclePlus, Database } from 'lucide-react';
+import { Cat, CirclePlus, Database } from 'lucide-react';
 
 const navItems = [
   { href: '/', emoji: '🏠', label: '总览' },
@@ -19,9 +19,10 @@ interface SidebarProps {
   onOpenQuickEntry: () => void;
   onOpenChat: () => void;
   onOpenLocalData: () => void;
+  onOpenCats: () => void;
 }
 
-export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat, onOpenLocalData }: SidebarProps) {
+export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat, onOpenLocalData, onOpenCats }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -65,6 +66,15 @@ export default function Sidebar({ onToggle, onOpenQuickEntry, onOpenChat, onOpen
           );
         })}
       </nav>
+
+      <button
+        onClick={onOpenCats}
+        className="flex h-[48px] w-[58px] flex-col items-center justify-center rounded-xl transition-all duration-150 btn-press hover:bg-sidebar-accent"
+        title="猫咪档案"
+      >
+        <Cat className="h-5 w-5 text-muted-foreground" />
+        <span className="mt-1 text-[10px] font-medium leading-none text-muted-foreground">猫咪</span>
+      </button>
 
       <button
         onClick={onOpenLocalData}

@@ -29,6 +29,7 @@ import { addLocalDays, localDateKey } from '@/lib/local-date';
 
 export default function DashboardPage() {
   const { state, today, updateFeedingRecord, toggleFeedingComplete } = useAppContext();
+  const activeCat = state.cats.find(cat => cat.id === state.activeCatId) || state.cats[0];
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
   const [completingRecord, setCompletingRecord] = useState<FeedingRecord | null>(null);
 
@@ -146,7 +147,7 @@ export default function DashboardPage() {
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">你好，欢迎回来</h1>
-          <p className="text-sm text-muted-foreground mt-1">这是钟福今天的状态概览</p>
+          <p className="text-sm text-muted-foreground mt-1">这是{activeCat?.name || '钟福'}今天的状态概览</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/15">
           <CalendarHeart className="w-4 h-4 text-primary" />

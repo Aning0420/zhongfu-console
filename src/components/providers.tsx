@@ -16,6 +16,7 @@ import {
   type HealthRecord,
   type Expense,
   type ChatMessage,
+  type CatProfile,
 } from '@/lib/store';
 import { plannedFeedingRecordsForDate, reconcilePlannedFeedingRecords } from '@/lib/feeding-plan';
 import { localDateKey, millisecondsUntilNextLocalDay } from '@/lib/local-date';
@@ -40,6 +41,10 @@ export interface SyncInfo {
 interface AppContextType {
   state: AppState;
   today: string;
+  addCat: (profile: Omit<CatProfile, 'id' | 'createdAt'>) => string;
+  updateCat: (id: string, updates: Partial<Omit<CatProfile, 'id' | 'createdAt'>>) => void;
+  deleteCat: (id: string) => void;
+  setActiveCat: (id: string) => void;
   addOrder: (order: Omit<Order, 'id'>) => void;
   updateOrder: (id: string, updates: Partial<Omit<Order, 'id'>>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
@@ -81,6 +86,8 @@ function genId(prefix: string): string {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>({
+    cats: [],
+    activeCatId: undefined,
     orders: [],
     feedingRecords: [],
     feedingPlans: [],
@@ -217,6 +224,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!syncKeyRef.current) throw new Error('请先开启云同步');
     await pushCurrentState();
   }, [pushCurrentState]);
+
+  const addCat = useCallback((profile: Omit<CatProfile, 'id' | 'createdAt'>) => {
+    const id = genId('cat-');
+    const newProfile: CatProfile = { ...profile, id, createdAt: new Date().toISOString() };
+    setState(prev => ({
+      ...prev,
+      cats: [...prev.cats, newProfile],
+      activeCatId: prev.activeCatId || id,
+    }));
+    return id;
+  }, []);
+
+  const updateCat = useCallback((id: string, updates: Partial<Omit<CatProfile, 'id' | 'createdAt'>>) => {
+    setState(prev => ({
+      ...prev,
+      cats: prev.cats.map(cat => cat.id === id ? { ...cat, ...updates } : cat),
+    }));
+  }, []);
+
+  const deleteCat = useCallback((id: string) => {
+    setState(prev => {
+      if (prev.cats.length <= 1) return prev;
+      const cats = prev.cats.filter(cat => cat.id !== id);
+      return {
+        ...prev,
+        cats,
+        activeCatId: prev.activeCatId === id ? cats[0]?.id : prev.activeCatId,
+      };
+    });
+  }, []);
+
+  const setActiveCat = useCallback((id: string) => {
+    setState(prev => prev.cats.some(cat => cat.id === id) ? { ...prev, activeCatId: id } : prev);
+  }, []);
 
   useEffect(() => {
     if (!loaded || !syncInfo.key || syncReadyRef.current) return;
@@ -584,7 +625,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, today, addOrder, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
+    <AppContext.Provider value={{ state, today, addCat, updateCat, deleteCat, setActiveCat, addOrder, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
       {children}
     </AppContext.Provider>
   );
