@@ -179,6 +179,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     state, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan,
     addHealthRecord, updateHealthRecord, addExpense, addChatMessages, clearChatMessages,
   } = useAppContext();
+  const [targetCatId, setTargetCatId] = useState(state.cats[0]?.id || '');
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
@@ -251,6 +252,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           ? (Number(d.price) || 0) * quantity
           : Number(d.total_price) || 0;
         addOrder({
+          catId: targetCatId,
           itemName: String(d.item_name || '未知物品'),
           itemGroup: String(d.item_group || '').trim() || undefined,
           category: normalizeInventoryCategory(d.category),
@@ -270,6 +272,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         });
         if (totalPrice > 0) {
           addExpense({
+            catId: targetCatId,
             category: normalizeInventoryCategory(d.category),
             amount: totalPrice,
             description: `采购${String(d.item_name || '未知物品')}`,
@@ -282,6 +285,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       case 'expense': {
         const d = syncData.data;
         addExpense({
+          catId: targetCatId,
           category: String(d.category || '日常'),
           amount: Number(d.amount) || 0,
           description: String(d.description || '支出'),
@@ -293,6 +297,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       case 'feeding': {
         const d = syncData.data;
         addFeedingRecord({
+          catId: targetCatId,
           date: today,
           mealType: (String(d.meal_type) || 'snack') as 'breakfast' | 'lunch' | 'dinner' | 'snack',
           foodName: String(d.food_name || '猫粮'),
@@ -393,12 +398,12 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         });
         const active = d.active !== false;
         if (active) {
-          const activeCatId = state.activeCatId || state.cats[0]?.id;
           state.feedingPlans.forEach(plan => {
-            if (plan.active && (!activeCatId || plan.catId === activeCatId)) updateFeedingPlan(plan.id, { active: false });
+            if (plan.active && plan.catId === targetCatId) updateFeedingPlan(plan.id, { active: false });
           });
         }
         addFeedingPlan({
+          catId: targetCatId,
           name: String(d.name || '助手创建的喂食计划'),
           active,
           stages: stages.length > 0 ? stages : [{
@@ -417,6 +422,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       case 'weight': {
         const d = syncData.data;
         addHealthRecord({
+          catId: targetCatId,
           type: 'weight',
           date: today,
           title: '体重记录',
@@ -435,12 +441,11 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           urine: enumValue(d.urine, ['normal', 'less', 'frequent', 'abnormal', 'unseen'] as const, 'unseen'),
           vomiting: enumValue(d.vomiting, ['none', 'hairball', 'food', 'yellow', 'other'] as const, 'none'),
         };
-        const activeCatId = state.activeCatId || state.cats[0]?.id;
-        const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === observationDate && (!activeCatId || record.catId === activeCatId));
+        const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === observationDate && record.catId === targetCatId);
         if (existing) {
           updateHealthRecord(existing.id, { detail: String(d.note || ''), observation });
         } else {
-          addHealthRecord({ type: 'observation', date: observationDate, title: '每日健康观察', detail: String(d.note || ''), observation });
+          addHealthRecord({ catId: targetCatId, type: 'observation', date: observationDate, title: '每日健康观察', detail: String(d.note || ''), observation });
         }
         break;
       }
@@ -453,6 +458,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           completed: false,
         };
         addHealthRecord({
+          catId: targetCatId,
           type: 'reminder',
           date: String(d.date || today),
           title: String(d.title || '照护提醒'),
@@ -468,6 +474,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         const cost = Number(d.cost) || 0;
         const reason = String(d.reason || '常规检查');
         addHealthRecord({
+          catId: targetCatId,
           type: 'visit',
           date: startDate,
           endDate,
@@ -478,6 +485,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         });
         if (cost > 0) {
           addExpense({
+            catId: targetCatId,
             date: startDate,
             category: 'medical',
             amount: cost,
@@ -488,7 +496,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         break;
       }
     }
-  }, [state.activeCatId, state.cats, state.feedingPlans, state.healthRecords, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan, addHealthRecord, updateHealthRecord, addExpense]);
+  }, [targetCatId, state.feedingPlans, state.healthRecords, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan, addHealthRecord, updateHealthRecord, addExpense]);
 
   // Send message with streaming
   const sendMessage = useCallback(async (content: string, image?: string) => {
@@ -531,7 +539,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       const res = await fetch(CHAT_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, image, context: buildAssistantContext(state) }),
+        body: JSON.stringify({ messages: apiMessages, image, context: buildAssistantContext({ ...state, activeCatId: targetCatId }) }),
         signal: controller.signal,
       });
 
@@ -615,7 +623,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       window.clearTimeout(timeoutId);
       setLoading(false);
     }
-  }, [messages, state, syncData, addChatMessages]);
+  }, [messages, state, targetCatId, syncData, addChatMessages]);
 
   const handleSubmit = useCallback(() => {
     sendMessage(input, pendingImage || undefined);
@@ -639,6 +647,9 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
               </div>
               <span className="font-semibold text-[#2D3E50]">智能助手</span>
               <span className="text-[10px] text-[#6B8A9E] bg-[#E8F4FD] px-1.5 py-0.5 rounded-full">AI</span>
+              <select value={targetCatId} onChange={event => setTargetCatId(event.target.value)} className="h-7 rounded-md border border-[#D6E8F5] bg-white px-1.5 text-xs text-[#2D3E50]" aria-label="助手记录对象">
+                {state.cats.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+              </select>
             </div>
             <div className="flex items-center gap-1">
               {messages.length > 0 && (

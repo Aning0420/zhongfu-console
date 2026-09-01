@@ -15,6 +15,7 @@ import type { HealthRecord, Expense } from '@/lib/store';
 import { HealthObservationPanel } from '@/components/health-observation-panel';
 import { CareReminderPanel } from '@/components/care-reminder-panel';
 import { localDateKey } from '@/lib/local-date';
+import { CatRecordSelect } from '@/components/cat-record-select';
 
 function inclusiveDays(startDate: string, endDate?: string) {
   if (!endDate) return 1;
@@ -31,8 +32,7 @@ function durationLabel(record: HealthRecord) {
 
 export default function HealthPage() {
   const { state, today, addHealthRecord, deleteHealthRecord, addExpense } = useAppContext();
-  const activeCatId = state.activeCatId || state.cats[0]?.id;
-  const catHealthRecords = useMemo(() => state.healthRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.healthRecords, activeCatId]);
+  const catHealthRecords = state.healthRecords;
   const [showAdd, setShowAdd] = useState(false);
   const [activeTab, setActiveTab] = useState('observations');
 
@@ -151,15 +151,21 @@ export default function HealthPage() {
         </TabsList>
 
         <TabsContent value="observations">
-          <HealthObservationPanel records={observationRecords} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            {state.cats.map(cat => <section key={cat.id} className="space-y-2"><h3 className="text-base font-semibold text-foreground">{cat.name}</h3><HealthObservationPanel catId={cat.id} records={observationRecords.filter(record => record.catId === cat.id)} /></section>)}
+          </div>
         </TabsContent>
 
         <TabsContent value="reminders">
-          <CareReminderPanel records={reminderRecords} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            {state.cats.map(cat => <section key={cat.id} className="space-y-2"><h3 className="text-base font-semibold text-foreground">{cat.name}</h3><CareReminderPanel catId={cat.id} records={reminderRecords.filter(record => record.catId === cat.id)} /></section>)}
+          </div>
         </TabsContent>
 
         <TabsContent value="visits" className="space-y-3">
-          {visitRecords.map(record => (
+          <div className="grid gap-4 lg:grid-cols-2">
+          {state.cats.map(cat => <section key={cat.id} className="space-y-3"><h3 className="text-base font-semibold text-foreground">{cat.name}</h3>
+          {visitRecords.filter(record => record.catId === cat.id).map(record => (
             <div key={record.id} className="card-warm p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
@@ -198,11 +204,15 @@ export default function HealthPage() {
               </div>
             </div>
           ))}
-          {visitRecords.length === 0 && <EmptyState text="暂无就医记录" />}
+          {visitRecords.filter(record => record.catId === cat.id).length === 0 && <EmptyState text="暂无就医记录" />}
+          </section>)}
+          </div>
         </TabsContent>
 
         <TabsContent value="medications" className="space-y-3">
-          {medicationRecords.map(record => (
+          <div className="grid gap-4 lg:grid-cols-2">
+          {state.cats.map(cat => <section key={cat.id} className="space-y-3"><h3 className="text-base font-semibold text-foreground">{cat.name}</h3>
+          {medicationRecords.filter(record => record.catId === cat.id).map(record => (
             <div key={record.id} className="card-warm p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
@@ -227,11 +237,15 @@ export default function HealthPage() {
               </div>
             </div>
           ))}
-          {medicationRecords.length === 0 && <EmptyState text="暂无用药记录" />}
+          {medicationRecords.filter(record => record.catId === cat.id).length === 0 && <EmptyState text="暂无用药记录" />}
+          </section>)}
+          </div>
         </TabsContent>
 
         <TabsContent value="weight">
-          <WeightChart records={weightRecords} onDelete={deleteHealthRecord} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            {state.cats.map(cat => <section key={cat.id} className="space-y-2"><h3 className="text-base font-semibold text-foreground">{cat.name}</h3><WeightChart records={weightRecords.filter(record => record.catId === cat.id)} onDelete={deleteHealthRecord} /></section>)}
+          </div>
         </TabsContent>
       </Tabs>
     </div>
@@ -348,6 +362,8 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function AddHealthDialog({ onClose, onAdd, addExpense }: { onClose: () => void; onAdd: (record: Omit<HealthRecord, 'id'>) => void; addExpense?: (expense: Omit<Expense, 'id'>) => void }) {
+  const { state } = useAppContext();
+  const [catId, setCatId] = useState(state.cats[0]?.id || '');
   const [form, setForm] = useState({
     date: localDateKey(),
     endDate: '',
@@ -369,6 +385,7 @@ function AddHealthDialog({ onClose, onAdd, addExpense }: { onClose: () => void; 
 
     const title = isWeight ? '体重记录' : form.title.trim();
     onAdd({
+      catId,
       date: form.date,
       endDate: form.type === 'visit' && form.endDate ? form.endDate : undefined,
       type: form.type,
@@ -380,6 +397,7 @@ function AddHealthDialog({ onClose, onAdd, addExpense }: { onClose: () => void; 
     });
     if (form.type === 'visit' && form.syncExpense && form.amount && Number(form.amount) > 0 && addExpense) {
       addExpense({
+        catId,
         date: form.date,
         category: 'medical',
         amount: Number(form.amount),
@@ -396,6 +414,7 @@ function AddHealthDialog({ onClose, onAdd, addExpense }: { onClose: () => void; 
         <DialogTitle>新增健康记录</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
+        <CatRecordSelect value={catId} onChange={setCatId} />
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>{form.type === 'visit' ? '开始日期' : '日期'}</Label>

@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { FeedingPlan, FeedingPlanStage } from '@/lib/store';
 import { localDateKey } from '@/lib/local-date';
 import { InventoryFoodInput } from '@/components/inventory-food-input';
+import { CatNameBadge, CatRecordSelect } from '@/components/cat-record-select';
 
 function dateAfter(days: number) {
   const date = new Date();
@@ -48,8 +49,7 @@ function clonePlan(plan: FeedingPlan): FeedingPlan {
 
 export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?: string[] }) {
   const { state, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan } = useAppContext();
-  const activeCatId = state.activeCatId || state.cats[0]?.id;
-  const catPlans = state.feedingPlans.filter(plan => !activeCatId || plan.catId === activeCatId);
+  const catPlans = state.feedingPlans;
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<FeedingPlan | null>(null);
 
@@ -64,8 +64,9 @@ export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?:
   };
 
   const activatePlan = (id: string) => {
+    const target = catPlans.find(plan => plan.id === id);
     catPlans.forEach(plan => {
-      if (plan.active && plan.id !== id) updateFeedingPlan(plan.id, { active: false });
+      if (plan.active && plan.id !== id && plan.catId === target?.catId) updateFeedingPlan(plan.id, { active: false });
     });
     updateFeedingPlan(id, { active: true });
   };
@@ -73,7 +74,7 @@ export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?:
   const savePlan = (draft: Omit<FeedingPlan, 'id' | 'createdAt'>) => {
     if (draft.active) {
       catPlans.forEach(plan => {
-        if (plan.active && plan.id !== editingPlan?.id) updateFeedingPlan(plan.id, { active: false });
+        if (plan.active && plan.id !== editingPlan?.id && plan.catId === draft.catId) updateFeedingPlan(plan.id, { active: false });
       });
     }
 
@@ -117,6 +118,7 @@ export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?:
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-semibold text-foreground">{plan.name}</h3>
+                    <CatNameBadge catId={plan.catId} />
                     {plan.active && <Badge className="bg-primary/20 text-primary-foreground border-0">当前启用</Badge>}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">{plan.stages.length} 个阶段</p>
@@ -186,7 +188,10 @@ function PlanEditorDialog({ plan, foodSuggestions, onClose, onSave }: {
   onClose: () => void;
   onSave: (plan: Omit<FeedingPlan, 'id' | 'createdAt'>) => void;
 }) {
-  const [name, setName] = useState(plan?.name || '钟福日常喂食计划');
+  const { state } = useAppContext();
+  const [catId, setCatId] = useState(plan?.catId || state.cats[0]?.id || '');
+  const catName = state.cats.find(cat => cat.id === catId)?.name || '猫咪';
+  const [name, setName] = useState(plan?.name || `${catName}日常喂食计划`);
   const [active, setActive] = useState(plan?.active ?? true);
   const [stages, setStages] = useState<FeedingPlanStage[]>(plan?.stages || [createStage()]);
 
@@ -232,6 +237,7 @@ function PlanEditorDialog({ plan, foodSuggestions, onClose, onSave }: {
         </DialogHeader>
 
         <div className="space-y-5">
+          <CatRecordSelect value={catId} onChange={setCatId} label="这是谁的计划" />
           <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
             <div className="space-y-1.5">
               <Label>计划名称</Label>
@@ -295,7 +301,7 @@ function PlanEditorDialog({ plan, foodSuggestions, onClose, onSave }: {
 
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>取消</Button>
-            <Button disabled={!valid} onClick={() => onSave({ name: name.trim(), active, stages })} className="bg-primary text-primary-foreground hover:bg-primary/90">保存计划</Button>
+            <Button disabled={!valid} onClick={() => onSave({ catId, name: name.trim(), active, stages })} className="bg-primary text-primary-foreground hover:bg-primary/90">保存计划</Button>
           </div>
         </div>
       </DialogContent>

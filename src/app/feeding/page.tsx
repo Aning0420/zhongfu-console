@@ -16,6 +16,7 @@ import { CompleteFeedingDialog } from '@/components/complete-feeding-dialog';
 import { plannedFeedingRecordsForDate, stageForDate } from '@/lib/feeding-plan';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
 import { InventoryFoodInput } from '@/components/inventory-food-input';
+import { CatRecordSelect } from '@/components/cat-record-select';
 
 const mealIcons = {
   breakfast: Coffee,
@@ -39,10 +40,9 @@ const eatingSpeedConfig = {
 
 export default function FeedingPage() {
   const { state, today, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
-  const activeCatId = state.activeCatId || state.cats[0]?.id;
-  const catRecords = useMemo(() => state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.feedingRecords, activeCatId]);
-  const catOrders = useMemo(() => state.orders.filter(order => !activeCatId || order.catId === activeCatId), [state.orders, activeCatId]);
-  const catPlans = useMemo(() => state.feedingPlans.filter(plan => !activeCatId || plan.catId === activeCatId), [state.feedingPlans, activeCatId]);
+  const catRecords = state.feedingRecords;
+  const catOrders = state.orders;
+  const catPlans = state.feedingPlans;
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
   const [selectedDate, setSelectedDate] = useState(today);
@@ -80,15 +80,14 @@ export default function FeedingPage() {
       .map(order => [order.itemGroup, order.itemName].filter(Boolean).join(' · ').trim())
       .filter(Boolean)
   )), [catOrders]);
-  const activePlan = catPlans.find(plan => plan.active);
-  const activeStage = activePlan ? stageForDate(activePlan.stages, selectedDate) : undefined;
+  const activePlans = useMemo(() => catPlans.filter(plan => plan.active), [catPlans]);
 
   useEffect(() => {
-    if (!activePlan) return;
-    const plannedRecords = plannedFeedingRecordsForDate(activePlan, selectedDate);
-    if (plannedRecords.length === 0) return;
-    syncPlannedFeedingRecords(selectedDate, activePlan.id, plannedRecords);
-  }, [activePlan, selectedDate, syncPlannedFeedingRecords]);
+    activePlans.forEach(plan => {
+      const plannedRecords = plannedFeedingRecordsForDate(plan, selectedDate);
+      if (plannedRecords.length > 0) syncPlannedFeedingRecords(selectedDate, plan.id, plannedRecords);
+    });
+  }, [activePlans, selectedDate, syncPlannedFeedingRecords]);
   const previousDate = useMemo(() => addLocalDays(selectedDate, -1), [selectedDate]);
   const previousDayRecords = recordsByDate[previousDate] || [];
 
@@ -96,6 +95,7 @@ export default function FeedingPage() {
     if (todayRecords.length > 0) return;
     previousDayRecords.forEach(record => {
       addFeedingRecord({
+        catId: record.catId,
         date: selectedDate,
         mealType: record.mealType,
         foodName: record.foodName,
@@ -128,7 +128,7 @@ export default function FeedingPage() {
 
   return (
     <div className="space-y-6 fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">喂食管理</h1>
           <p className="text-sm text-muted-foreground mt-1">安排喂食计划，记录每天的完成情况</p>
@@ -160,9 +160,9 @@ export default function FeedingPage() {
         >喂食计划</button>
       </div>
 
-      {view === 'records' ? <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {view === 'records' ? <div className="grid grid-cols-1 gap-6">
         {/* Calendar */}
-        <div className="lg:col-span-2 card-warm p-5">
+        <div className="card-warm p-5">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">
               {year}年{month + 1}月
@@ -193,7 +193,7 @@ export default function FeedingPage() {
               if (!day) return <div key={`pad-${i}`} />;
               const dateStr = formatDateStr(day);
               const records = recordsByDate[dateStr] || [];
-              const hasPlan = Boolean(activePlan && stageForDate(activePlan.stages, dateStr));
+              const hasPlan = activePlans.some(plan => stageForDate(plan.stages, dateStr));
               const allDone = records.length > 0 && records.every(r => r.completed);
               const someDone = records.some(r => r.completed);
               const isSelected = dateStr === selectedDate;
@@ -261,9 +261,6 @@ export default function FeedingPage() {
                 {selectedDate === today ? '今日喂食记录' : `${selectedDate.slice(5).replace('-', '月')}日喂食记录`}
               </h2>
               <p className="text-xs text-muted-foreground mt-1">{selectedDate}</p>
-              {activePlan && activeStage && (
-                <p className="mt-1 text-xs text-primary-foreground">{activePlan.name} · {activeStage.name}</p>
-              )}
             </div>
             {todayRecords.length === 0 && previousDayRecords.length > 0 && (
               <Button variant="outline" size="sm" onClick={copyPreviousDay} className="h-8 shrink-0 px-2.5 text-xs">
@@ -271,9 +268,19 @@ export default function FeedingPage() {
               </Button>
             )}
           </div>
-          <div className="space-y-3">
+          <div className="grid gap-4 md:grid-cols-2">
+            {state.cats.map(cat => {
+              const catDayRecords = todayRecords.filter(record => record.catId === cat.id);
+              const catPlan = activePlans.find(plan => plan.catId === cat.id);
+              const catStage = catPlan ? stageForDate(catPlan.stages, selectedDate) : undefined;
+              return <section key={cat.id} className="rounded-lg border border-border bg-background/55 p-4">
+                <div className="mb-3 flex items-center justify-between gap-2 border-b border-border/60 pb-3">
+                  <div><h3 className="font-semibold text-foreground">{cat.name}</h3>{catPlan && catStage && <p className="mt-0.5 text-xs text-primary-foreground">{catPlan.name} · {catStage.name}</p>}</div>
+                  <span className="text-xs text-muted-foreground">{catDayRecords.filter(record => record.completed).length}/{catDayRecords.length} 已完成</span>
+                </div>
+                <div className="space-y-3">
             {(['breakfast', 'lunch', 'dinner', 'snack'] as const).map(mealType => {
-              const mealRecords = todayRecords.filter(r => r.mealType === mealType);
+              const mealRecords = catDayRecords.filter(r => r.mealType === mealType);
               const Icon = mealIcons[mealType];
               return (
                 <div key={mealType} className="flex items-start gap-3 p-3 rounded-lg bg-muted/20">
@@ -369,6 +376,9 @@ export default function FeedingPage() {
                   </div>
                 </div>
               );
+            })}
+                </div>
+              </section>;
             })}
           </div>
 
@@ -467,6 +477,8 @@ export default function FeedingPage() {
 }
 
 function AddFeedingDialog({ defaultDate, foodSuggestions, onClose, onAdd }: { defaultDate: string; foodSuggestions: string[]; onClose: () => void; onAdd: (record: Omit<FeedingRecord, 'id'>) => void }) {
+  const { state } = useAppContext();
+  const [catId, setCatId] = useState(state.cats[0]?.id || '');
   const [form, setForm] = useState({
     date: defaultDate,
     mealType: 'breakfast' as FeedingRecord['mealType'],
@@ -482,6 +494,7 @@ function AddFeedingDialog({ defaultDate, foodSuggestions, onClose, onAdd }: { de
   const handleSubmit = () => {
     if (!form.foodName || !form.amount) return;
     onAdd({
+      catId,
       ...form,
       foodName: form.foodName.trim(),
       amount: form.amount.trim(),
@@ -498,6 +511,7 @@ function AddFeedingDialog({ defaultDate, foodSuggestions, onClose, onAdd }: { de
         <DialogTitle>记录喂食</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
+        <CatRecordSelect value={catId} onChange={setCatId} />
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>日期</Label>

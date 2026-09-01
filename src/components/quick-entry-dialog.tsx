@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getPriceHistory, type DailyObservation, type FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
+import { CatRecordSelect } from '@/components/cat-record-select';
 
 type EntryType = 'feeding' | 'observation' | 'weight' | 'expense' | 'purchase';
 
@@ -26,6 +27,7 @@ function getSuggestedMeal(): FeedingRecord['mealType'] {
 export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { state, today, addOrder, addFeedingRecord, addHealthRecord, updateHealthRecord, addExpense } = useAppContext();
   const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const [catId, setCatId] = useState(activeCatId || '');
   const [entryType, setEntryType] = useState<EntryType>('feeding');
   const [feeding, setFeeding] = useState({ mealType: getSuggestedMeal(), foodName: '', amount: '', medication: '', remainingAmount: '', eatingSpeed: 'normal' as NonNullable<FeedingRecord['eatingSpeed']>, note: '' });
   const [observation, setObservation] = useState<DailyObservation>({ appetite: 'normal', energy: 'normal', stool: 'normal', urine: 'normal', vomiting: 'none' });
@@ -43,6 +45,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
   const submitFeeding = () => {
     if (!feeding.foodName.trim() || !feeding.amount.trim()) return;
     addFeedingRecord({
+      catId,
       date: today,
       mealType: feeding.mealType,
       foodName: feeding.foodName.trim(),
@@ -61,6 +64,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
     const value = Number(weight.value);
     if (!Number.isFinite(value) || value <= 0) return;
     addHealthRecord({
+      catId,
       date: today,
       type: 'weight',
       title: '日常称重',
@@ -72,11 +76,11 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
   };
 
   const submitObservation = () => {
-    const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === today && (!activeCatId || record.catId === activeCatId));
+    const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === today && record.catId === catId);
     if (existing) {
       updateHealthRecord(existing.id, { observation, detail: observationNote.trim() });
     } else {
-      addHealthRecord({ date: today, type: 'observation', title: '每日健康观察', detail: observationNote.trim(), observation });
+      addHealthRecord({ catId, date: today, type: 'observation', title: '每日健康观察', detail: observationNote.trim(), observation });
     }
     setObservationNote('');
     close();
@@ -86,6 +90,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
     const amount = Number(expense.amount);
     if (!expense.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
     addExpense({
+      catId,
       date: today,
       category: expense.category,
       amount,
@@ -101,6 +106,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
     if (!purchase.itemName.trim() || !purchase.totalPrice || !Number.isFinite(quantity) || quantity <= 0) return;
 
     addOrder({
+      catId,
       itemName: purchase.itemName.trim(),
       category: purchase.category,
       quantity,
@@ -115,6 +121,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
 
     if (purchase.syncExpense && purchaseTotalPrice > 0) {
       addExpense({
+        catId,
         date: today,
         category: purchase.category,
         amount: purchaseTotalPrice,
@@ -134,6 +141,8 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
           <DialogTitle>快速记录</DialogTitle>
           <DialogDescription>把刚刚发生的事情记下来，默认使用今天的日期。</DialogDescription>
         </DialogHeader>
+
+        <CatRecordSelect value={catId} onChange={setCatId} />
 
         <Tabs value={entryType} onValueChange={value => setEntryType(value as EntryType)}>
           <TabsList className="grid h-auto w-full grid-cols-5">

@@ -12,6 +12,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
 import type { Expense } from '@/lib/store';
 import { localDateKey } from '@/lib/local-date';
+import { CatNameBadge, CatRecordSelect } from '@/components/cat-record-select';
 
 const categoryColors: Record<string, string> = {
   '主粮': '#87CEEB',
@@ -35,13 +36,13 @@ const expenseCategories = ['主粮', '零食', '日用', '保健品', '玩具', 
 
 export default function ExpensesPage() {
   const { state, addExpense, updateExpense, deleteExpense } = useAppContext();
-  const activeCatId = state.activeCatId || state.cats[0]?.id;
-  const catExpenses = useMemo(() => state.expenses.filter(expense => !activeCatId || expense.catId === activeCatId), [state.expenses, activeCatId]);
+  const catExpenses = state.expenses;
   const [showAdd, setShowAdd] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [catFilter, setCatFilter] = useState('all');
   const detailsRef = useRef<HTMLDivElement>(null);
   const breakdownRef = useRef<HTMLDivElement>(null);
 
@@ -61,9 +62,10 @@ export default function ExpensesPage() {
   const filteredExpenses = useMemo(() =>
     monthExpenses
       .filter(e => categoryFilter === 'all' || e.category === categoryFilter)
+      .filter(e => catFilter === 'all' || e.catId === catFilter)
       .filter(e => !search.trim() || e.description.toLowerCase().includes(search.trim().toLowerCase()) || e.category.includes(search.trim()))
       .sort((a, b) => b.date.localeCompare(a.date)),
-    [monthExpenses, categoryFilter, search]
+    [monthExpenses, categoryFilter, catFilter, search]
   );
 
   const stats = useMemo(() => {
@@ -96,7 +98,7 @@ export default function ExpensesPage() {
 
   return (
     <div className="space-y-6 fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">支出记账</h1>
           <p className="text-sm text-muted-foreground mt-1">管理日常支出，追踪费用趋势</p>
@@ -176,6 +178,10 @@ export default function ExpensesPage() {
                   {availableCategories.map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <Select value={catFilter} onValueChange={setCatFilter}>
+                <SelectTrigger className="w-[110px] bg-card"><SelectValue placeholder="全部猫咪" /></SelectTrigger>
+                <SelectContent><SelectItem value="all">全部猫咪</SelectItem>{state.cats.map(cat => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}</SelectContent>
+              </Select>
               <Input
                 type="month"
                 value={filterMonth}
@@ -194,7 +200,7 @@ export default function ExpensesPage() {
                   />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{expense.description}</p>
-                    <p className="text-xs text-muted-foreground">{expense.category} · {expense.date}</p>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><CatNameBadge catId={expense.catId} />{expense.category} · {expense.date}</p>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -311,6 +317,8 @@ function ExpenseDialog({ initialExpense, onClose, onSave, onSaveMany }: {
   onSave: (expense: Omit<Expense, 'id'>) => void;
   onSaveMany?: (expenses: Omit<Expense, 'id'>[]) => void;
 }) {
+  const { state } = useAppContext();
+  const [catId, setCatId] = useState(initialExpense?.catId || state.cats[0]?.id || '');
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [form, setForm] = useState({
     date: initialExpense?.date || localDateKey(),
@@ -333,6 +341,7 @@ function ExpenseDialog({ initialExpense, onClose, onSave, onSaveMany }: {
     if (!initialExpense && mode === 'batch') {
       if (!batchValid || !onSaveMany) return;
       onSaveMany(batchItems.map(item => ({
+        catId,
         date: form.date,
         category: item.category,
         amount: Number(item.amount),
@@ -344,6 +353,7 @@ function ExpenseDialog({ initialExpense, onClose, onSave, onSaveMany }: {
     }
     if (!form.amount || !form.description) return;
     onSave({
+      catId,
       date: form.date,
       category: form.category,
       amount: Number(form.amount),
@@ -359,6 +369,7 @@ function ExpenseDialog({ initialExpense, onClose, onSave, onSaveMany }: {
         <DialogTitle>{initialExpense ? '编辑支出' : '记一笔支出'}</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
+        <CatRecordSelect value={catId} onChange={setCatId} />
         {!initialExpense && (
           <div className="grid grid-cols-2 rounded-lg bg-muted/55 p-1" role="tablist" aria-label="支出录入方式">
             <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'single' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>单笔支出</button>

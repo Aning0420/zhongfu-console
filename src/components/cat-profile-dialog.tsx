@@ -53,7 +53,7 @@ function profileLabel(profile: CatProfile): string {
 }
 
 export function CatProfileDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { state, addCat, updateCat, deleteCat, setActiveCat } = useAppContext();
+  const { state, addCat, updateCat, deleteCat } = useAppContext();
   const [selectedId, setSelectedId] = useState('');
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<CatForm>(emptyForm);
@@ -77,7 +77,6 @@ export function CatProfileDialog({ open, onOpenChange }: { open: boolean; onOpen
     setSelectedId(profile.id);
     setCreating(false);
     setForm(formFromProfile(profile));
-    setActiveCat(profile.id);
   };
 
   const startCreating = () => {
@@ -104,7 +103,6 @@ export function CatProfileDialog({ open, onOpenChange }: { open: boolean; onOpen
       const id = addCat(values);
       setSelectedId(id);
       setCreating(false);
-      setActiveCat(id);
     } else if (selectedCat) {
       updateCat(selectedCat.id, values);
     }
@@ -115,12 +113,11 @@ export function CatProfileDialog({ open, onOpenChange }: { open: boolean; onOpen
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Cat className="size-5 text-primary-foreground" />猫咪档案</DialogTitle>
-          <DialogDescription>保存每只猫咪的基本资料；点选名字可以切换当前关注的猫咪。</DialogDescription>
+          <DialogDescription>保存每只猫咪的基本资料；点选名字可以查看和编辑对应档案。</DialogDescription>
         </DialogHeader>
 
         <div className="flex gap-2 overflow-x-auto pb-1">
           {state.cats.map(cat => {
-            const active = cat.id === state.activeCatId;
             const selected = !creating && cat.id === selectedId;
             return (
               <button
@@ -134,7 +131,7 @@ export function CatProfileDialog({ open, onOpenChange }: { open: boolean; onOpen
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-semibold text-foreground">{cat.name}</span>
-                  {active && <Check className="size-4 shrink-0 text-primary-foreground" />}
+                  {selected && <Check className="size-4 shrink-0 text-primary-foreground" />}
                 </span>
                 <span className="mt-1 block truncate text-xs text-muted-foreground">{profileLabel(cat)}</span>
               </button>

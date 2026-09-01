@@ -20,7 +20,7 @@ const repeatLabels: Record<CareReminder['repeat'], string> = {
   none: '仅一次', daily: '每天', weekly: '每周', monthly: '每月', yearly: '每年',
 };
 
-export function CareReminderPanel({ records }: { records: HealthRecord[] }) {
+export function CareReminderPanel({ records, catId }: { records: HealthRecord[]; catId: string }) {
   const { today, addHealthRecord, updateHealthRecord, deleteHealthRecord } = useAppContext();
   const [open, setOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HealthRecord | undefined>();
@@ -125,7 +125,7 @@ export function CareReminderPanel({ records }: { records: HealthRecord[] }) {
           if (editingRecord) {
             updateHealthRecord(editingRecord.id, { date, title, detail, reminder });
           } else {
-            addHealthRecord({ date, type: 'reminder', title, detail, reminder });
+            addHealthRecord({ catId, date, type: 'reminder', title, detail, reminder });
           }
           setOpen(false);
           setEditingRecord(undefined);

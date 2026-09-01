@@ -9,7 +9,6 @@ import { QuickEntryDialog } from '@/components/quick-entry-dialog';
 import { PwaRegister } from '@/components/pwa-register';
 import { LocalDataDialog } from '@/components/local-data-dialog';
 import { CatProfileDialog } from '@/components/cat-profile-dialog';
-import { ActiveCatSelector } from '@/components/active-cat-selector';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -57,7 +56,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
         <main className="app-main flex-1 min-w-0 overflow-x-hidden p-4 sm:p-6 transition-all duration-300">
           <div className={pathname === '/procurement' ? 'mx-auto w-full max-w-[1800px]' : 'mx-auto max-w-[1200px]'}>
-            <ActiveCatSelector onManage={() => setCatProfileOpen(true)} />
             {children}
           </div>
         </main>

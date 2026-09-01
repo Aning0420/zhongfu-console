@@ -26,15 +26,14 @@ import {
 import { cn } from '@/lib/utils';
 import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, inventoryRemaining, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
+import { CatNameBadge } from '@/components/cat-record-select';
 
 export default function DashboardPage() {
   const { state, today, updateFeedingRecord, toggleFeedingComplete } = useAppContext();
-  const activeCat = state.cats.find(cat => cat.id === state.activeCatId) || state.cats[0];
-  const activeCatId = activeCat?.id;
-  const catOrders = useMemo(() => state.orders.filter(order => !activeCatId || order.catId === activeCatId), [state.orders, activeCatId]);
-  const catFeedingRecords = useMemo(() => state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.feedingRecords, activeCatId]);
-  const catHealthRecords = useMemo(() => state.healthRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.healthRecords, activeCatId]);
-  const catExpenses = useMemo(() => state.expenses.filter(expense => !activeCatId || expense.catId === activeCatId), [state.expenses, activeCatId]);
+  const catOrders = state.orders;
+  const catFeedingRecords = state.feedingRecords;
+  const catHealthRecords = state.healthRecords;
+  const catExpenses = state.expenses;
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
   const [completingRecord, setCompletingRecord] = useState<FeedingRecord | null>(null);
 
@@ -152,7 +151,7 @@ export default function DashboardPage() {
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">你好，欢迎回来</h1>
-          <p className="text-sm text-muted-foreground mt-1">这是{activeCat?.name || '钟福'}今天的状态概览</p>
+          <p className="text-sm text-muted-foreground mt-1">这是钟福和七遇今天的家庭照护概览</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/15">
           <CalendarHeart className="w-4 h-4 text-primary" />
@@ -202,7 +201,7 @@ export default function DashboardPage() {
                   </button>
                   <div className="min-w-0 flex-1">
                     <p className={cn('text-sm font-medium', record.completed ? 'text-muted-foreground line-through' : 'text-foreground')}>
-                      {record.mealType === 'breakfast' ? '早餐' : record.mealType === 'lunch' ? '午餐' : record.mealType === 'dinner' ? '晚餐' : '加餐'} · {record.foodName}
+                      <CatNameBadge catId={record.catId} /> {record.mealType === 'breakfast' ? '早餐' : record.mealType === 'lunch' ? '午餐' : record.mealType === 'dinner' ? '晚餐' : '加餐'} · {record.foodName}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {record.planId && record.plannedTime ? record.plannedTime : record.amount}

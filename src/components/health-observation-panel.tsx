@@ -29,7 +29,7 @@ function observationLabel(field: typeof observationFields[number], value: string
   return field.options.find(option => option[0] === value)?.[1] || value;
 }
 
-export function HealthObservationPanel({ records }: { records: HealthRecord[] }) {
+export function HealthObservationPanel({ records, catId }: { records: HealthRecord[]; catId: string }) {
   const { today, addHealthRecord, updateHealthRecord, deleteHealthRecord } = useAppContext();
   const [open, setOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HealthRecord | undefined>();
@@ -115,7 +115,7 @@ export function HealthObservationPanel({ records }: { records: HealthRecord[] })
           if (existing) {
             updateHealthRecord(existing.id, { date, observation, detail });
           } else {
-            addHealthRecord({ date, type: 'observation', title: '每日健康观察', detail, observation });
+            addHealthRecord({ catId, date, type: 'observation', title: '每日健康观察', detail, observation });
           }
           setOpen(false);
           setEditingRecord(undefined);
