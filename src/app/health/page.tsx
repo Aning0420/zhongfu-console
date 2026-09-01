@@ -31,6 +31,8 @@ function durationLabel(record: HealthRecord) {
 
 export default function HealthPage() {
   const { state, today, addHealthRecord, deleteHealthRecord, addExpense } = useAppContext();
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const catHealthRecords = useMemo(() => state.healthRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.healthRecords, activeCatId]);
   const [showAdd, setShowAdd] = useState(false);
   const [activeTab, setActiveTab] = useState('observations');
 
@@ -42,28 +44,28 @@ export default function HealthPage() {
   }, []);
 
   const visitRecords = useMemo(() =>
-    state.healthRecords.filter(r => r.type === 'visit').sort((a, b) => b.date.localeCompare(a.date)),
-    [state.healthRecords]
+    catHealthRecords.filter(r => r.type === 'visit').sort((a, b) => b.date.localeCompare(a.date)),
+    [catHealthRecords]
   );
 
   const medicationRecords = useMemo(() =>
-    state.healthRecords.filter(r => r.type === 'medication').sort((a, b) => b.date.localeCompare(a.date)),
-    [state.healthRecords]
+    catHealthRecords.filter(r => r.type === 'medication').sort((a, b) => b.date.localeCompare(a.date)),
+    [catHealthRecords]
   );
 
   const weightRecords = useMemo(() =>
-    state.healthRecords.filter(r => r.type === 'weight' && r.weight).sort((a, b) => a.date.localeCompare(b.date)),
-    [state.healthRecords]
+    catHealthRecords.filter(r => r.type === 'weight' && r.weight).sort((a, b) => a.date.localeCompare(b.date)),
+    [catHealthRecords]
   );
 
   const observationRecords = useMemo(() =>
-    state.healthRecords.filter(r => r.type === 'observation').sort((a, b) => b.date.localeCompare(a.date)),
-    [state.healthRecords]
+    catHealthRecords.filter(r => r.type === 'observation').sort((a, b) => b.date.localeCompare(a.date)),
+    [catHealthRecords]
   );
 
   const reminderRecords = useMemo(() =>
-    state.healthRecords.filter(r => r.type === 'reminder'),
-    [state.healthRecords]
+    catHealthRecords.filter(r => r.type === 'reminder'),
+    [catHealthRecords]
   );
 
   const todayObserved = observationRecords.some(record => record.date === today);

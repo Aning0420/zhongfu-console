@@ -39,6 +39,10 @@ const eatingSpeedConfig = {
 
 export default function FeedingPage() {
   const { state, today, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, toggleFeedingComplete, deleteFeedingRecord } = useAppContext();
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const catRecords = useMemo(() => state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.feedingRecords, activeCatId]);
+  const catOrders = useMemo(() => state.orders.filter(order => !activeCatId || order.catId === activeCatId), [state.orders, activeCatId]);
+  const catPlans = useMemo(() => state.feedingPlans.filter(plan => !activeCatId || plan.catId === activeCatId), [state.feedingPlans, activeCatId]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAdd, setShowAdd] = useState(false);
   const [selectedDate, setSelectedDate] = useState(today);
@@ -62,21 +66,21 @@ export default function FeedingPage() {
 
   const recordsByDate = useMemo(() => {
     const map: Record<string, FeedingRecord[]> = {};
-    state.feedingRecords.forEach(r => {
+    catRecords.forEach(r => {
       if (!map[r.date]) map[r.date] = [];
       map[r.date].push(r);
     });
     return map;
-  }, [state.feedingRecords]);
+  }, [catRecords]);
 
   const todayRecords = recordsByDate[selectedDate] || [];
   const foodSuggestions = useMemo(() => Array.from(new Set(
-    state.orders
+    catOrders
       .filter(order => !['cancelled', 'finished', 'durable'].includes(order.status))
       .map(order => [order.itemGroup, order.itemName].filter(Boolean).join(' · ').trim())
       .filter(Boolean)
-  )), [state.orders]);
-  const activePlan = state.feedingPlans.find(plan => plan.active);
+  )), [catOrders]);
+  const activePlan = catPlans.find(plan => plan.active);
   const activeStage = activePlan ? stageForDate(activePlan.stages, selectedDate) : undefined;
 
   useEffect(() => {
@@ -374,13 +378,13 @@ export default function FeedingPage() {
             <div className="grid grid-cols-2 gap-2">
               <div className="text-center p-2.5 rounded-lg bg-primary/5">
                 <p className="text-lg font-bold text-primary">
-                  {state.feedingRecords.filter(r => r.date.startsWith(selectedDate.slice(0, 7)) && r.completed).length}
+                  {catRecords.filter(r => r.date.startsWith(selectedDate.slice(0, 7)) && r.completed).length}
                 </p>
                 <p className="text-xs text-muted-foreground">已完成</p>
               </div>
               <div className="text-center p-2.5 rounded-lg bg-accent/5">
                 <p className="text-lg font-bold text-accent">
-                  {state.feedingRecords.filter(r => r.date.startsWith(selectedDate.slice(0, 7)) && !r.completed).length}
+                  {catRecords.filter(r => r.date.startsWith(selectedDate.slice(0, 7)) && !r.completed).length}
                 </p>
                 <p className="text-xs text-muted-foreground">待完成</p>
               </div>
@@ -394,7 +398,7 @@ export default function FeedingPage() {
             </h3>
             {(() => {
               const foodMap: Record<string, { fast: number; normal: number; slow: number }> = {};
-              state.feedingRecords.forEach(r => {
+              catRecords.forEach(r => {
                 if (!r.eatingSpeed) return;
                 if (!foodMap[r.foodName]) foodMap[r.foodName] = { fast: 0, normal: 0, slow: 0 };
                 foodMap[r.foodName][r.eatingSpeed]++;

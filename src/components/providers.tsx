@@ -311,8 +311,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addOrder = useCallback((order: Omit<Order, 'id'>) => {
     const id = genId('o');
-    const newOrder = { ...order, id };
-    setState(prev => ({ ...prev, orders: [...prev.orders, newOrder] }));
+    setState(prev => ({
+      ...prev,
+      orders: [...prev.orders, { ...order, id, catId: order.catId || prev.activeCatId || prev.cats[0]?.id }],
+    }));
   }, []);
 
   const updateOrder = useCallback((id: string, updates: Partial<Omit<Order, 'id'>>) => {
@@ -452,7 +454,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addFeedingRecord = useCallback((record: Omit<FeedingRecord, 'id'>) => {
     const id = genId('f');
     setState(prev => {
-      const baseRecord = { ...record, id, inventoryDeductions: undefined };
+      const baseRecord = { ...record, id, catId: record.catId || prev.activeCatId || prev.cats[0]?.id, inventoryDeductions: undefined };
       const result = deductInventoryForFeeding(baseRecord, prev.orders);
       const newRecord = result.deductions.length > 0
         ? { ...baseRecord, inventoryDeductions: result.deductions }
@@ -464,16 +466,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const syncPlannedFeedingRecords = useCallback((date: string, planId: string, records: Omit<FeedingRecord, 'id'>[]) => {
     setState(prev => {
       const result = reconcilePlannedFeedingRecords(prev.feedingRecords, date, planId, records, () => genId('f'));
-      return result.changed ? { ...prev, feedingRecords: result.records } : prev;
+      const planCatId = prev.feedingPlans.find(plan => plan.id === planId)?.catId || prev.activeCatId || prev.cats[0]?.id;
+      const recordsWithCat = result.records.map(record => record.catId ? record : { ...record, catId: planCatId });
+      return result.changed ? { ...prev, feedingRecords: recordsWithCat } : prev;
     });
   }, []);
 
   useEffect(() => {
     if (!loaded) return;
-    const activePlan = state.feedingPlans.find(plan => plan.active);
-    if (!activePlan) return;
-    const records = plannedFeedingRecordsForDate(activePlan, today);
-    if (records.length > 0) syncPlannedFeedingRecords(today, activePlan.id, records);
+    state.feedingPlans.filter(plan => plan.active).forEach(plan => {
+      const records = plannedFeedingRecordsForDate(plan, today);
+      if (records.length > 0) syncPlannedFeedingRecords(today, plan.id, records);
+    });
   }, [loaded, state.feedingPlans, syncPlannedFeedingRecords, today]);
 
   const updateFeedingRecord = useCallback((id: string, updates: Partial<FeedingRecord>) => {
@@ -542,8 +546,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addFeedingPlan = useCallback((plan: Omit<FeedingPlan, 'id' | 'createdAt'>) => {
     const id = genId('fp');
-    const newPlan = { ...plan, id, createdAt: new Date().toISOString() };
-    setState(prev => ({ ...prev, feedingPlans: [...prev.feedingPlans, newPlan] }));
+    setState(prev => ({
+      ...prev,
+      feedingPlans: [...prev.feedingPlans, { ...plan, id, catId: plan.catId || prev.activeCatId || prev.cats[0]?.id, createdAt: new Date().toISOString() }],
+    }));
     return id;
   }, []);
 
@@ -560,8 +566,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addHealthRecord = useCallback((record: Omit<HealthRecord, 'id'>) => {
     const id = genId('h');
-    const newRecord = { ...record, id };
-    setState(prev => ({ ...prev, healthRecords: [...prev.healthRecords, newRecord] }));
+    setState(prev => ({
+      ...prev,
+      healthRecords: [...prev.healthRecords, { ...record, id, catId: record.catId || prev.activeCatId || prev.cats[0]?.id }],
+    }));
   }, []);
 
   const updateHealthRecord = useCallback((id: string, updates: Partial<Omit<HealthRecord, 'id'>>) => {
@@ -582,8 +590,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addExpense = useCallback((expense: Omit<Expense, 'id'>) => {
     const id = genId('e');
-    const newExpense = { ...expense, id };
-    setState(prev => ({ ...prev, expenses: [...prev.expenses, newExpense] }));
+    setState(prev => ({
+      ...prev,
+      expenses: [...prev.expenses, { ...expense, id, catId: expense.catId || prev.activeCatId || prev.cats[0]?.id }],
+    }));
   }, []);
 
   const updateExpense = useCallback((id: string, updates: Partial<Omit<Expense, 'id'>>) => {

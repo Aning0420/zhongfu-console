@@ -30,30 +30,35 @@ import { addLocalDays, localDateKey } from '@/lib/local-date';
 export default function DashboardPage() {
   const { state, today, updateFeedingRecord, toggleFeedingComplete } = useAppContext();
   const activeCat = state.cats.find(cat => cat.id === state.activeCatId) || state.cats[0];
+  const activeCatId = activeCat?.id;
+  const catOrders = useMemo(() => state.orders.filter(order => !activeCatId || order.catId === activeCatId), [state.orders, activeCatId]);
+  const catFeedingRecords = useMemo(() => state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.feedingRecords, activeCatId]);
+  const catHealthRecords = useMemo(() => state.healthRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.healthRecords, activeCatId]);
+  const catExpenses = useMemo(() => state.expenses.filter(expense => !activeCatId || expense.catId === activeCatId), [state.expenses, activeCatId]);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
   const [completingRecord, setCompletingRecord] = useState<FeedingRecord | null>(null);
 
   const stats = useMemo(() => {
     const thisMonth = today.slice(0, 7);
 
-    const todayFeedings = state.feedingRecords.filter(r => r.date === today);
+    const todayFeedings = catFeedingRecords.filter(r => r.date === today);
     const completedFeedings = todayFeedings.filter(r => r.completed).length;
     const totalFeedings = todayFeedings.length;
 
-    const monthExpenses = state.expenses
+    const monthExpenses = catExpenses
       .filter(e => e.date.startsWith(thisMonth))
       .reduce((sum, e) => sum + e.amount, 0);
-    const monthOrders = state.orders.filter(order => order.purchaseDate.startsWith(thisMonth)).length;
-    const monthCompletedFeedings = state.feedingRecords.filter(record => record.completed && record.date.startsWith(thisMonth)).length;
-    const monthHealthRecords = state.healthRecords.filter(record => record.date.startsWith(thisMonth)).length;
+    const monthOrders = catOrders.filter(order => order.purchaseDate.startsWith(thisMonth)).length;
+    const monthCompletedFeedings = catFeedingRecords.filter(record => record.completed && record.date.startsWith(thisMonth)).length;
+    const monthHealthRecords = catHealthRecords.filter(record => record.date.startsWith(thisMonth)).length;
 
-    const todayObserved = state.healthRecords.some(record => record.type === 'observation' && record.date === today);
-    const dueReminders = state.healthRecords
+    const todayObserved = catHealthRecords.some(record => record.type === 'observation' && record.date === today);
+    const dueReminders = catHealthRecords
       .filter(record => record.type === 'reminder' && !record.reminder?.completed && record.date <= today)
       .sort((a, b) => a.date.localeCompare(b.date));
 
     // Expiring items (within 7 days)
-    const expiringItems = state.orders
+    const expiringItems = catOrders
       .map(order => {
         if (!order.productionDate || !order.shelfLife || !['delivered', 'no-repurchase'].includes(order.status)) return null;
         const prod = new Date(`${order.productionDate}T00:00:00Z`);
@@ -66,11 +71,11 @@ export default function DashboardPage() {
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
     // Repurchase items (depletion within 7 days)
-    const repurchaseItems = state.orders
+    const repurchaseItems = catOrders
       .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
         const remaining = inventoryRemaining(order);
-        const observedUsage = calcDailyUsage(order.itemName, state.feedingRecords, order.unit, order);
+        const observedUsage = calcDailyUsage(order.itemName, catFeedingRecords, order.unit, order);
         const dailyUsage = observedUsage > 0
           ? observedUsage
           : normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
@@ -87,25 +92,25 @@ export default function DashboardPage() {
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
     return { completedFeedings, totalFeedings, monthExpenses, monthOrders, monthCompletedFeedings, monthHealthRecords, expiringItems, repurchaseItems, todayObserved, dueReminders };
-  }, [state, today]);
+  }, [catOrders, catFeedingRecords, catHealthRecords, catExpenses, today]);
 
   const todayCare = useMemo(() => {
     const mealOrder = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
-    return state.feedingRecords
+    return catFeedingRecords
       .filter(record => record.date === today)
       .sort((a, b) => mealOrder[a.mealType] - mealOrder[b.mealType]);
-  }, [state.feedingRecords, today]);
+  }, [catFeedingRecords, today]);
 
   const latestWeight = useMemo(() => {
-    return state.healthRecords
+    return catHealthRecords
       .filter(record => record.type === 'weight' && record.weight)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
-  }, [state.healthRecords]);
+  }, [catHealthRecords]);
 
   const recentActivities = useMemo(() => {
     const activities: { id: string; icon: React.ElementType; color: string; text: string; time: string }[] = [];
 
-    state.feedingRecords
+    catFeedingRecords
       .filter(r => r.completed)
       .slice(-3)
       .forEach(r => {
@@ -118,7 +123,7 @@ export default function DashboardPage() {
         });
       });
 
-    state.healthRecords.slice(-2).forEach(r => {
+    catHealthRecords.slice(-2).forEach(r => {
       activities.push({
         id: r.id,
         icon: HeartPulse,
@@ -128,7 +133,7 @@ export default function DashboardPage() {
       });
     });
 
-    state.orders.slice(-2).forEach(o => {
+    catOrders.slice(-2).forEach(o => {
       activities.push({
         id: o.id,
         icon: ShoppingCart,
@@ -139,7 +144,7 @@ export default function DashboardPage() {
     });
 
     return activities.sort((a, b) => b.time.localeCompare(a.time)).slice(0, 6);
-  }, [state]);
+  }, [catFeedingRecords, catHealthRecords, catOrders]);
 
   return (
     <div className="space-y-6 fade-in">

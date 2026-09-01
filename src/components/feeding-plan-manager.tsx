@@ -48,6 +48,8 @@ function clonePlan(plan: FeedingPlan): FeedingPlan {
 
 export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?: string[] }) {
   const { state, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan } = useAppContext();
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const catPlans = state.feedingPlans.filter(plan => !activeCatId || plan.catId === activeCatId);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<FeedingPlan | null>(null);
 
@@ -62,7 +64,7 @@ export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?:
   };
 
   const activatePlan = (id: string) => {
-    state.feedingPlans.forEach(plan => {
+    catPlans.forEach(plan => {
       if (plan.active && plan.id !== id) updateFeedingPlan(plan.id, { active: false });
     });
     updateFeedingPlan(id, { active: true });
@@ -70,7 +72,7 @@ export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?:
 
   const savePlan = (draft: Omit<FeedingPlan, 'id' | 'createdAt'>) => {
     if (draft.active) {
-      state.feedingPlans.forEach(plan => {
+      catPlans.forEach(plan => {
         if (plan.active && plan.id !== editingPlan?.id) updateFeedingPlan(plan.id, { active: false });
       });
     }
@@ -83,7 +85,7 @@ export function FeedingPlanManager({ foodSuggestions = [] }: { foodSuggestions?:
     setEditorOpen(false);
   };
 
-  const sortedPlans = [...state.feedingPlans].sort((a, b) => {
+  const sortedPlans = [...catPlans].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
     return b.createdAt.localeCompare(a.createdAt);
   });

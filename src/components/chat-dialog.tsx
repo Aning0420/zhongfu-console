@@ -107,12 +107,19 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], fall
 function buildAssistantContext(state: AppState): string {
   const today = localDateKey();
   const month = today.slice(0, 7);
-  const latestWeight = state.healthRecords
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const activeCat = state.cats.find(cat => cat.id === activeCatId);
+  const catOrders = state.orders.filter(order => !activeCatId || order.catId === activeCatId);
+  const catFeedingRecords = state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId);
+  const catFeedingPlans = state.feedingPlans.filter(plan => !activeCatId || plan.catId === activeCatId);
+  const catHealthRecords = state.healthRecords.filter(record => !activeCatId || record.catId === activeCatId);
+  const catExpenses = state.expenses.filter(expense => !activeCatId || expense.catId === activeCatId);
+  const latestWeight = catHealthRecords
     .filter(record => record.type === 'weight' && typeof record.weight === 'number')
     .sort((a, b) => b.date.localeCompare(a.date))[0];
-  const activePlan = state.feedingPlans.find(plan => plan.active);
+  const activePlan = catFeedingPlans.find(plan => plan.active);
   const activeStage = activePlan?.stages.find(stage => stage.startDate <= today && stage.endDate >= today);
-  const inventory = state.orders
+  const inventory = catOrders
     .filter(order => order.status !== 'cancelled' && order.status !== 'finished' && inventoryRemaining(order) > 0)
     .slice(-20)
     .map(order => ({
@@ -124,19 +131,20 @@ function buildAssistantContext(state: AppState): string {
       suitableLifeStages: order.suitableLifeStages,
       feedingGuidance: order.feedingGuidance,
     }));
-  const recentHealth = [...state.healthRecords]
+  const recentHealth = [...catHealthRecords]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 8)
     .map(record => ({ date: record.date, type: record.type, title: record.title, detail: record.detail, weight: record.weight }));
-  const todayFeeding = state.feedingRecords
+  const todayFeeding = catFeedingRecords
     .filter(record => record.date === today)
     .map(record => ({ meal: record.mealType, food: record.foodName, amount: record.amount, remaining: record.remainingAmount, completed: record.completed, note: record.note }));
-  const monthExpense = state.expenses
+  const monthExpense = catExpenses
     .filter(expense => expense.date.startsWith(month))
     .reduce((total, expense) => total + expense.amount, 0);
 
   return JSON.stringify({
     today,
+    activeCat: activeCat ? { id: activeCat.id, name: activeCat.name } : null,
     cats: state.cats.map(cat => ({
       name: cat.name,
       sex: cat.sex,
@@ -146,7 +154,7 @@ function buildAssistantContext(state: AppState): string {
       color: cat.color,
       origin: cat.origin,
       notes: cat.notes,
-      active: cat.id === state.activeCatId,
+      active: cat.id === activeCatId,
     })),
     latestWeight: latestWeight ? { date: latestWeight.date, kg: latestWeight.weight } : null,
     activeFeedingPlan: activePlan ? {
@@ -385,8 +393,9 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         });
         const active = d.active !== false;
         if (active) {
+          const activeCatId = state.activeCatId || state.cats[0]?.id;
           state.feedingPlans.forEach(plan => {
-            if (plan.active) updateFeedingPlan(plan.id, { active: false });
+            if (plan.active && (!activeCatId || plan.catId === activeCatId)) updateFeedingPlan(plan.id, { active: false });
           });
         }
         addFeedingPlan({
@@ -426,7 +435,8 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           urine: enumValue(d.urine, ['normal', 'less', 'frequent', 'abnormal', 'unseen'] as const, 'unseen'),
           vomiting: enumValue(d.vomiting, ['none', 'hairball', 'food', 'yellow', 'other'] as const, 'none'),
         };
-        const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === observationDate);
+        const activeCatId = state.activeCatId || state.cats[0]?.id;
+        const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === observationDate && (!activeCatId || record.catId === activeCatId));
         if (existing) {
           updateHealthRecord(existing.id, { detail: String(d.note || ''), observation });
         } else {
@@ -478,7 +488,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         break;
       }
     }
-  }, [state.feedingPlans, state.healthRecords, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan, addHealthRecord, updateHealthRecord, addExpense]);
+  }, [state.activeCatId, state.cats, state.feedingPlans, state.healthRecords, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan, addHealthRecord, updateHealthRecord, addExpense]);
 
   // Send message with streaming
   const sendMessage = useCallback(async (content: string, image?: string) => {

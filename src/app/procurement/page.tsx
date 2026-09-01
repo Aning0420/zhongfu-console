@@ -147,6 +147,9 @@ function getDailyUsage(order: Order, feedingRecords: FeedingRecord[]): number {
 
 export default function ProcurementPage() {
   const { state, addOrder, updateOrder, updateOrderStatus, updateOrderCategory, adjustOrderStock, deleteOrder, addExpense } = useAppContext();
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const catOrders = useMemo(() => state.orders.filter(order => !activeCatId || order.catId === activeCatId), [state.orders, activeCatId]);
+  const catFeedingRecords = useMemo(() => state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId), [state.feedingRecords, activeCatId]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -232,10 +235,10 @@ export default function ProcurementPage() {
   };
 
   const filteredOrders = useMemo(() => {
-    return state.orders
+    return catOrders
       .filter(o => {
         const expiry = getExpiryInfo(o);
-        const depletion = getDepletionInfo(o, state.feedingRecords);
+        const depletion = getDepletionInfo(o, catFeedingRecords);
         const stockRatio = o.quantity > 0 ? inventoryRemaining(o) / o.quantity : 0;
         if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
         if (statusFilter === 'expiring' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
@@ -257,11 +260,11 @@ export default function ProcurementPage() {
           || chineseCollator.compare(a.itemName, b.itemName)
           || chineseCollator.compare(a.id, b.id);
       });
-  }, [state.orders, state.feedingRecords, search, statusFilter, categoryFilter, sortField, sortDirection]);
+  }, [catOrders, catFeedingRecords, search, statusFilter, categoryFilter, sortField, sortDirection]);
 
   // Items expiring within 7 days
   const expiringItems = useMemo(() => {
-    return state.orders
+    return catOrders
       .map(order => {
         const info = getExpiryInfo(order);
         if (!info) return null;
@@ -269,25 +272,25 @@ export default function ProcurementPage() {
       })
       .filter((item): item is { order: Order; daysLeft: number; expiryDate: string } => item !== null && item.daysLeft <= 7 && ['delivered', 'no-repurchase'].includes(item.order.status))
       .sort((a, b) => a.daysLeft - b.daysLeft);
-  }, [state.orders]);
+  }, [catOrders]);
 
   // Items needing repurchase within 7 days (based on consumption speed)
   const repurchaseItems = useMemo(() => {
-    return state.orders
+    return catOrders
       .filter(o => o.status === 'delivered' && !o.repurchasedAt)
       .map(order => {
-        const info = getDepletionInfo(order, state.feedingRecords);
+        const info = getDepletionInfo(order, catFeedingRecords);
         if (!info) return null;
         return { order, ...info };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null && item.daysLeft <= 7)
       .sort((a, b) => a.daysLeft - b.daysLeft);
-  }, [state.orders, state.feedingRecords]);
+  }, [catOrders, catFeedingRecords]);
 
   // Food preference analysis from feeding records
   const foodPreferences = useMemo(() => {
     const foodMap = new Map<string, { fast: number; normal: number; slow: number; total: number }>();
-    state.feedingRecords.forEach(r => {
+    catFeedingRecords.forEach(r => {
       const food = r.foodName || r.mealType;
       if (!foodMap.has(food)) foodMap.set(food, { fast: 0, normal: 0, slow: 0, total: 0 });
       const stats = foodMap.get(food)!;
@@ -297,7 +300,7 @@ export default function ProcurementPage() {
       else stats.normal++;
     });
     // Link to procurement orders
-    return state.orders
+    return catOrders
       .filter(o => ['delivered', 'no-repurchase'].includes(o.status))
       .map(order => {
         const food = order.itemName;
@@ -308,21 +311,21 @@ export default function ProcurementPage() {
         return { order, preference, stats };
       })
       .filter(item => item.preference !== 'unknown');
-  }, [state.orders, state.feedingRecords]);
+  }, [catOrders, catFeedingRecords]);
 
   const summary = useMemo(() => {
-    const stockValue = state.orders
+    const stockValue = catOrders
       .filter(o => ['delivered', 'no-repurchase', 'durable'].includes(o.status))
       .reduce((sum, order) => sum + inventoryRemaining(order) * order.unitPrice, 0);
-    const lowStock = state.orders.filter(order => {
+    const lowStock = catOrders.filter(order => {
       if (order.status !== 'delivered' || order.repurchasedAt) return false;
       const ratio = order.quantity > 0 ? inventoryRemaining(order) / order.quantity : 0;
-      const depletion = getDepletionInfo(order, state.feedingRecords);
+      const depletion = getDepletionInfo(order, catFeedingRecords);
       return ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7);
     }).length;
-    const pending = state.orders.filter(o => o.status === 'pending' || o.status === 'shipped').length;
-    return { stockValue, lowStock, pending, count: state.orders.length };
-  }, [state.orders, state.feedingRecords]);
+    const pending = catOrders.filter(o => o.status === 'pending' || o.status === 'shipped').length;
+    return { stockValue, lowStock, pending, count: catOrders.length };
+  }, [catOrders, catFeedingRecords]);
 
   const showOrderFilter = (filter: string) => {
     setStatusFilter(filter);
@@ -344,7 +347,7 @@ export default function ProcurementPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 新建采购
             </Button>
           </DialogTrigger>
-          {showAdd && <AddOrderDialog orders={state.orders} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
+          {showAdd && <AddOrderDialog orders={catOrders} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
         </Dialog>
       </div>
 
@@ -572,8 +575,8 @@ export default function ProcurementPage() {
                 const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
-                const dailyUsage = getDailyUsage(order, state.feedingRecords);
-                const depletion = getDepletionInfo(order, state.feedingRecords);
+                const dailyUsage = getDailyUsage(order, catFeedingRecords);
+                const depletion = getDepletionInfo(order, catFeedingRecords);
                 const needsRestock = order.status === 'delivered' && !order.repurchasedAt
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
                 const sourceOrderIndex = state.orders.findIndex(item => item.id === order.id);
@@ -748,7 +751,7 @@ export default function ProcurementPage() {
         <EditOrderDialog
           key={editingOrder.id}
           order={editingOrder}
-          orders={state.orders}
+          orders={catOrders}
           onClose={() => setEditingOrder(null)}
           onSave={updates => {
             updateOrder(editingOrder.id, updates);

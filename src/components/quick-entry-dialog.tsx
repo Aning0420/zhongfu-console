@@ -25,6 +25,7 @@ function getSuggestedMeal(): FeedingRecord['mealType'] {
 
 export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { state, today, addOrder, addFeedingRecord, addHealthRecord, updateHealthRecord, addExpense } = useAppContext();
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
   const [entryType, setEntryType] = useState<EntryType>('feeding');
   const [feeding, setFeeding] = useState({ mealType: getSuggestedMeal(), foodName: '', amount: '', medication: '', remainingAmount: '', eatingSpeed: 'normal' as NonNullable<FeedingRecord['eatingSpeed']>, note: '' });
   const [observation, setObservation] = useState<DailyObservation>({ appetite: 'normal', energy: 'normal', stool: 'normal', urine: 'normal', vomiting: 'none' });
@@ -71,7 +72,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
   };
 
   const submitObservation = () => {
-    const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === today);
+    const existing = state.healthRecords.find(record => record.type === 'observation' && record.date === today && (!activeCatId || record.catId === activeCatId));
     if (existing) {
       updateHealthRecord(existing.id, { observation, detail: observationNote.trim() });
     } else {

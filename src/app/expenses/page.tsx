@@ -35,6 +35,8 @@ const expenseCategories = ['主粮', '零食', '日用', '保健品', '玩具', 
 
 export default function ExpensesPage() {
   const { state, addExpense, updateExpense, deleteExpense } = useAppContext();
+  const activeCatId = state.activeCatId || state.cats[0]?.id;
+  const catExpenses = useMemo(() => state.expenses.filter(expense => !activeCatId || expense.catId === activeCatId), [state.expenses, activeCatId]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -44,16 +46,16 @@ export default function ExpensesPage() {
   const breakdownRef = useRef<HTMLDivElement>(null);
 
   const availableCategories = useMemo(() =>
-    Array.from(new Set(state.expenses.map(expense => expense.category))).sort((a, b) => a.localeCompare(b, 'zh-CN')),
-    [state.expenses]
+    Array.from(new Set(catExpenses.map(expense => expense.category))).sort((a, b) => a.localeCompare(b, 'zh-CN')),
+    [catExpenses]
   );
   const categoryColorMap = useMemo(() => Object.fromEntries(
     availableCategories.map((category, index) => [category, categoryColors[category] || categoryPalette[index % categoryPalette.length]])
   ), [availableCategories]);
 
   const monthExpenses = useMemo(() =>
-    state.expenses.filter(expense => expense.date.startsWith(filterMonth)),
-    [state.expenses, filterMonth]
+    catExpenses.filter(expense => expense.date.startsWith(filterMonth)),
+    [catExpenses, filterMonth]
   );
 
   const filteredExpenses = useMemo(() =>
@@ -79,8 +81,8 @@ export default function ExpensesPage() {
     const [y, m] = filterMonth.split('-').map(Number);
     const prev = new Date(y, m - 2, 1);
     const prevStr = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
-    return state.expenses.filter(e => e.date.startsWith(prevStr)).reduce((s, e) => s + e.amount, 0);
-  }, [state.expenses, filterMonth]);
+    return catExpenses.filter(e => e.date.startsWith(prevStr)).reduce((s, e) => s + e.amount, 0);
+  }, [catExpenses, filterMonth]);
 
   const changePercent = prevMonthStats > 0 ? ((stats.total - prevMonthStats) / prevMonthStats * 100).toFixed(0) : null;
   const showDetails = () => {

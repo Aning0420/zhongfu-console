@@ -2,6 +2,7 @@ import { localDateKey } from '@/lib/local-date';
 
 export interface Order {
   id: string;
+  catId?: string;
   itemName: string;
   /** Optional series/group heading shared by related flavors or variants. */
   itemGroup?: string;
@@ -86,6 +87,7 @@ export function getPriceHistory(
 
 export interface FeedingRecord {
   id: string;
+  catId?: string;
   date: string;
   mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   foodName: string;
@@ -239,6 +241,7 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
   const eligibleOrders = orders.filter(order =>
     ['delivered', 'no-repurchase', 'shipped', 'pending'].includes(order.status)
     && inventoryRemaining(order) > 0
+    && (!record.catId || (order.catId || 'cat-zhongfu') === record.catId)
   );
   const identitiesByKind = new Map<string, Set<string>>();
   eligibleOrders.forEach(order => {
@@ -382,6 +385,7 @@ export interface FeedingPlanStage {
 // 喂食计划
 export interface FeedingPlan {
   id: string;
+  catId?: string;
   name: string;
   stages: FeedingPlanStage[];
   createdAt: string;
@@ -405,6 +409,7 @@ export interface CareReminder {
 
 export interface HealthRecord {
   id: string;
+  catId?: string;
   date: string;
   endDate?: string;
   type: 'visit' | 'medication' | 'weight' | 'observation' | 'reminder';
@@ -419,6 +424,7 @@ export interface HealthRecord {
 
 export interface Expense {
   id: string;
+  catId?: string;
   date: string;
   category: string;
   amount: number;
@@ -510,7 +516,7 @@ const defaultExpenses: Expense[] = [
 ];
 
 const defaultChatMessages: ChatMessage[] = [
-  { id: 'c0', role: 'assistant', content: '你好！我是钟福的专属助手，有什么可以帮你的吗？你可以问我关于喂食、支出、健康等方面的问题。', timestamp: new Date().toISOString() },
+  { id: 'c0', role: 'assistant', content: '你好！我是猫咪管理助手，有什么可以帮你的吗？你可以问我关于喂食、支出、健康等方面的问题。', timestamp: new Date().toISOString() },
 ];
 
 const defaultCats: CatProfile[] = [
@@ -560,7 +566,9 @@ export function loadState(): AppState {
       return parsed;
     }
   } catch { /* ignore */ }
-  const initial = initialAppState();
+  // Run the same migration as saved/remote data so seeded demo records also
+  // belong to the default cat and are visible immediately after first launch.
+  const initial = migrateLegacyDemoData(initialAppState());
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
   return initial;
 }
@@ -654,11 +662,17 @@ function migrateLegacyDemoData(state: AppState): AppState {
         const imageUrls = Array.from(new Set([...storedImages, legacyImage].filter(Boolean))).slice(0, 4);
         return {
           ...order,
+          catId: order.catId || 'cat-zhongfu',
           imageUrls: imageUrls.length ? imageUrls : undefined,
           imageUrl: imageUrls[0] || undefined,
         };
       }),
-    expenses: state.expenses.filter(expense => !removedExpenseIds.has(expense.id)),
+    feedingRecords: state.feedingRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),
+    feedingPlans: state.feedingPlans.map(plan => ({ ...plan, catId: plan.catId || 'cat-zhongfu' })),
+    healthRecords: state.healthRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),
+    expenses: state.expenses
+      .filter(expense => !removedExpenseIds.has(expense.id))
+      .map(expense => ({ ...expense, catId: expense.catId || 'cat-zhongfu' })),
   };
 }
 
