@@ -241,7 +241,6 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
   const eligibleOrders = orders.filter(order =>
     ['delivered', 'no-repurchase', 'shipped', 'pending'].includes(order.status)
     && inventoryRemaining(order) > 0
-    && (!record.catId || (order.catId || 'cat-zhongfu') === record.catId)
   );
   const identitiesByKind = new Map<string, Set<string>>();
   eligibleOrders.forEach(order => {
@@ -662,7 +661,7 @@ function migrateLegacyDemoData(state: AppState): AppState {
         const imageUrls = Array.from(new Set([...storedImages, legacyImage].filter(Boolean))).slice(0, 4);
         return {
           ...order,
-          catId: order.catId || 'cat-zhongfu',
+          catId: 'shared',
           imageUrls: imageUrls.length ? imageUrls : undefined,
           imageUrl: imageUrls[0] || undefined,
         };

@@ -313,7 +313,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const id = genId('o');
     setState(prev => ({
       ...prev,
-      orders: [...prev.orders, { ...order, id, catId: order.catId || prev.activeCatId || prev.cats[0]?.id }],
+      orders: [...prev.orders, { ...order, id, catId: 'shared' }],
     }));
   }, []);
 

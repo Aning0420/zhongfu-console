@@ -109,7 +109,7 @@ function buildAssistantContext(state: AppState): string {
   const month = today.slice(0, 7);
   const activeCatId = state.activeCatId || state.cats[0]?.id;
   const activeCat = state.cats.find(cat => cat.id === activeCatId);
-  const catOrders = state.orders.filter(order => !activeCatId || order.catId === activeCatId);
+  const catOrders = state.orders;
   const catFeedingRecords = state.feedingRecords.filter(record => !activeCatId || record.catId === activeCatId);
   const catFeedingPlans = state.feedingPlans.filter(plan => !activeCatId || plan.catId === activeCatId);
   const catHealthRecords = state.healthRecords.filter(record => !activeCatId || record.catId === activeCatId);
@@ -252,7 +252,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           ? (Number(d.price) || 0) * quantity
           : Number(d.total_price) || 0;
         addOrder({
-          catId: targetCatId,
+          catId: 'shared',
           itemName: String(d.item_name || '未知物品'),
           itemGroup: String(d.item_group || '').trim() || undefined,
           category: normalizeInventoryCategory(d.category),
@@ -272,7 +272,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
         });
         if (totalPrice > 0) {
           addExpense({
-            catId: targetCatId,
+            catId: 'shared',
             category: normalizeInventoryCategory(d.category),
             amount: totalPrice,
             description: `采购${String(d.item_name || '未知物品')}`,

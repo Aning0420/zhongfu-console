@@ -20,7 +20,6 @@ import { InventoryCategoryOptions } from '@/components/inventory-category-option
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
 import { analyzeProductImages, compressProductImage, type ProductImageAnalysis } from '@/lib/product-image';
-import { CatNameBadge, CatRecordSelect } from '@/components/cat-record-select';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -153,7 +152,6 @@ export default function ProcurementPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [catFilter, setCatFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<SortField>('purchaseDate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [sortReady, setSortReady] = useState(false);
@@ -247,7 +245,6 @@ export default function ProcurementPage() {
         if (statusFilter === 'in-progress' && !['pending', 'shipped'].includes(o.status)) return false;
         if (!['all', 'low-stock', 'expiring', 'expired', 'in-progress'].includes(statusFilter) && o.status !== statusFilter) return false;
         if (categoryFilter !== 'all' && o.category !== categoryFilter) return false;
-        if (catFilter !== 'all' && o.catId !== catFilter) return false;
         if (search && !o.itemName.includes(search) && !(o.itemGroup || '').includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
         return true;
       })
@@ -262,7 +259,7 @@ export default function ProcurementPage() {
           || chineseCollator.compare(a.itemName, b.itemName)
           || chineseCollator.compare(a.id, b.id);
       });
-  }, [catOrders, catFeedingRecords, search, statusFilter, categoryFilter, catFilter, sortField, sortDirection]);
+  }, [catOrders, catFeedingRecords, search, statusFilter, categoryFilter, sortField, sortDirection]);
 
   // Items expiring within 7 days
   const expiringItems = useMemo(() => {
@@ -494,10 +491,6 @@ export default function ProcurementPage() {
             <InventoryCategoryOptions />
           </SelectContent>
         </Select>
-        <Select value={catFilter} onValueChange={setCatFilter}>
-          <SelectTrigger className="w-[120px] bg-card"><SelectValue placeholder="全部猫咪" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">全部猫咪</SelectItem>{state.cats.map(cat => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}</SelectContent>
-        </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[156px] bg-card">
             <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
@@ -603,7 +596,6 @@ export default function ProcurementPage() {
                         ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
                         <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
-                      <div className="mt-1"><CatNameBadge catId={order.catId} /></div>
                       {(order.productBenefits || order.suitableLifeStages || order.feedingGuidance) && (
                         <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground" title={order.productBenefits || order.feedingGuidance}>
                           {order.productBenefits || order.feedingGuidance}
@@ -1084,8 +1076,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   onClose: () => void;
   onSave: (updates: Partial<Omit<Order, 'id'>>) => void;
 }) {
-  const { state } = useAppContext();
-  const [catId, setCatId] = useState(order.catId || state.cats[0]?.id || '');
   const initialShelfLife = shelfLifeForEditing(order.shelfLife, order.shelfLifeUnit);
   const [form, setForm] = useState({
     itemName: order.itemName,
@@ -1128,7 +1118,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   const handleSave = () => {
     if (!valid) return;
     onSave({
-      catId,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
@@ -1159,7 +1148,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           <DialogTitle>编辑采购记录</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-1">
-          <CatRecordSelect value={catId} onChange={setCatId} label="这份物资给谁" />
           <ProductImageField
             imageUrls={form.imageUrls}
             onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
@@ -1263,8 +1251,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 }
 
 function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
-  const { state } = useAppContext();
-  const [catId, setCatId] = useState(state.cats[0]?.id || '');
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
     itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
@@ -1313,7 +1299,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         const itemQuantity = Number(item.quantity);
         const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
         onAdd({
-          catId,
+          catId: 'shared',
           itemName: item.itemName.trim(),
           itemGroup: item.itemGroup.trim() || undefined,
           category: item.category,
@@ -1336,7 +1322,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         const hasExactAllocation = Math.abs(bundleRemaining) < 0.005 && bundleItems.every(item => Number(item.allocatedPrice) > 0);
         if (hasExactAllocation) {
           bundleItems.forEach(item => addExpense({
-            catId,
+            catId: 'shared',
             date: form.purchaseDate,
             category: item.category,
             amount: Number(item.allocatedPrice),
@@ -1345,7 +1331,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           }));
         } else {
           addExpense({
-            catId,
+            catId: 'shared',
             date: form.purchaseDate,
             category: '其他',
             amount: totalPrice,
@@ -1361,7 +1347,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       || (Number.isFinite(Number(form.packageSize)) && Number(form.packageSize) > 0 && Boolean(form.packageUnit.trim()));
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
     onAdd({
-      catId,
+      catId: 'shared',
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
@@ -1386,7 +1372,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     });
     if (form.syncExpense && totalPrice > 0) {
       addExpense({
-        catId,
+        catId: 'shared',
         date: form.purchaseDate || localDateKey(),
         category: form.category,
         amount: totalPrice,
@@ -1403,7 +1389,6 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         <DialogTitle>新建采购订单</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
-        <CatRecordSelect value={catId} onChange={setCatId} label="这次采购给谁" />
         <div className="grid grid-cols-2 rounded-lg bg-muted/55 p-1" role="tablist" aria-label="采购录入方式">
           <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'single' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>单品采购</button>
           <button type="button" role="tab" aria-selected={mode === 'bundle'} onClick={() => setMode('bundle')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'bundle' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>组合采购</button>

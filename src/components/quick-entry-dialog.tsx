@@ -106,7 +106,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
     if (!purchase.itemName.trim() || !purchase.totalPrice || !Number.isFinite(quantity) || quantity <= 0) return;
 
     addOrder({
-      catId,
+      catId: 'shared',
       itemName: purchase.itemName.trim(),
       category: purchase.category,
       quantity,
@@ -121,7 +121,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
 
     if (purchase.syncExpense && purchaseTotalPrice > 0) {
       addExpense({
-        catId,
+        catId: 'shared',
         date: today,
         category: purchase.category,
         amount: purchaseTotalPrice,
@@ -142,7 +142,7 @@ export function QuickEntryDialog({ open, onOpenChange }: { open: boolean; onOpen
           <DialogDescription>把刚刚发生的事情记下来，默认使用今天的日期。</DialogDescription>
         </DialogHeader>
 
-        <CatRecordSelect value={catId} onChange={setCatId} />
+        {entryType !== 'purchase' && <CatRecordSelect value={catId} onChange={setCatId} />}
 
         <Tabs value={entryType} onValueChange={value => setEntryType(value as EntryType)}>
           <TabsList className="grid h-auto w-full grid-cols-5">

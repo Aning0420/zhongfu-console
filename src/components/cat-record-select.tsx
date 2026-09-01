@@ -23,6 +23,7 @@ export function CatRecordSelect({ value, onChange, label = '记录给谁' }: { v
 
 export function CatNameBadge({ catId }: { catId?: string }) {
   const { state } = useAppContext();
+  if (catId === 'shared') return <span className="inline-flex rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">家庭共用</span>;
   const cat = state.cats.find(item => item.id === catId) || state.cats[0];
   return <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary-foreground">{cat?.name || '未指定'}</span>;
 }

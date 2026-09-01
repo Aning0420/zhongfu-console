@@ -180,7 +180,7 @@ export default function ExpensesPage() {
               </Select>
               <Select value={catFilter} onValueChange={setCatFilter}>
                 <SelectTrigger className="w-[110px] bg-card"><SelectValue placeholder="全部猫咪" /></SelectTrigger>
-                <SelectContent><SelectItem value="all">全部猫咪</SelectItem>{state.cats.map(cat => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}</SelectContent>
+                <SelectContent><SelectItem value="all">全部归属</SelectItem><SelectItem value="shared">家庭共用</SelectItem>{state.cats.map(cat => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}</SelectContent>
               </Select>
               <Input
                 type="month"

@@ -36,7 +36,7 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
     if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0) return;
 
     addOrder({
-      catId: order.catId,
+      catId: 'shared',
       itemName: order.itemName,
       category: order.category,
       quantity,
@@ -52,7 +52,7 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
 
     if (form.syncExpense && totalPrice > 0) {
       addExpense({
-        catId: order.catId,
+        catId: 'shared',
         date: form.purchaseDate,
         category: order.category,
         amount: totalPrice,
