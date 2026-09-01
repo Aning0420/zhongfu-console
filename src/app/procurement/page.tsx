@@ -876,20 +876,21 @@ function PriceChangeLabel({ history }: { history: NonNullable<ReturnType<typeof 
   );
 }
 
-function ShelfLifeField({ value, unit, onValueChange, onUnitChange, label = '保质期（选填）' }: {
+function ShelfLifeField({ value, unit, onValueChange, onUnitChange, label = '保质期（选填）', compact = false }: {
   value: string;
   unit: ShelfLifeUnit;
   onValueChange: (value: string) => void;
   onUnitChange: (unit: ShelfLifeUnit) => void;
   label?: string;
+  compact?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label className={cn(compact && 'text-xs text-muted-foreground')}>{label}</Label>
       <div className="flex gap-2">
         <Input type="number" min="0" step="any" value={value} onChange={event => onValueChange(event.target.value)} placeholder="如：18" className="min-w-0 flex-1" />
         <Select value={unit} onValueChange={nextUnit => onUnitChange(nextUnit as ShelfLifeUnit)}>
-          <SelectTrigger className="w-[92px] shrink-0"><SelectValue /></SelectTrigger>
+          <SelectTrigger className={cn('shrink-0', compact ? 'w-[72px]' : 'w-[92px]')}><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="day">天</SelectItem>
             <SelectItem value="month">月</SelectItem>
@@ -1433,13 +1434,14 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                     <Input value={item.unit} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, unit: event.target.value } : entry))} placeholder="单位" />
                     <Input type="number" min="0" step="0.01" value={item.allocatedPrice} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, allocatedPrice: event.target.value } : entry))} placeholder="分摊金额(选填)" />
                   </div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-4">
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.15fr)_minmax(168px,1.35fr)_minmax(82px,0.75fr)_minmax(78px,0.75fr)]">
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">生产日期（选填）</Label>
                       <Input type="date" value={item.productionDate} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, productionDate: event.target.value } : entry))} aria-label={`明细 ${index + 1} 生产日期`} />
                     </div>
                     <ShelfLifeField
                       label="保质期（选填）"
+                      compact
                       value={item.shelfLife}
                       unit={item.shelfLifeUnit}
                       onValueChange={shelfLife => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLife } : entry))}
