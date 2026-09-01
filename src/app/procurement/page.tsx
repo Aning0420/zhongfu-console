@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import Image from 'next/image';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -1253,8 +1253,9 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 
 function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
+  const [historyTemplateId, setHistoryTemplateId] = useState('');
   const [form, setForm] = useState({
-    itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: 'kg', totalPrice: '', supplier: '',
+    itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '',
     imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
@@ -1263,6 +1264,43 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     { id: 'bundle_1', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
     { id: 'bundle_2', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
   ]);
+  const historyTemplates = useMemo(() => {
+    const seen = new Set<string>();
+    return [...orders]
+      .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate))
+      .filter(order => {
+        const key = `${order.itemName.trim().toLocaleLowerCase('zh-CN')}\u0000${order.unit.trim().toLocaleLowerCase('zh-CN')}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [orders]);
+
+  const applyHistoryTemplate = (templateId: string) => {
+    setHistoryTemplateId(templateId);
+    const template = orders.find(order => order.id === templateId);
+    if (!template) return;
+    const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
+    setForm(current => ({
+      ...current,
+      itemName: template.itemName,
+      itemGroup: template.itemGroup || '',
+      category: template.category,
+      quantity: String(template.quantity),
+      unit: template.unit,
+      totalPrice: String(orderTotalPrice(template)),
+      supplier: template.supplier,
+      productionDate: '',
+      shelfLife: shelfLife.value,
+      shelfLifeUnit: shelfLife.unit,
+      packageSize: template.packageSize ? String(template.packageSize) : '',
+      packageUnit: template.packageUnit || '',
+      imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
+      productBenefits: template.productBenefits || '',
+      suitableLifeStages: template.suitableLifeStages || '',
+      feedingGuidance: template.feedingGuidance || '',
+    }));
+  };
 
   const quantity = Number(form.quantity);
   const totalPrice = Number(form.totalPrice);
@@ -1472,6 +1510,25 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           </>
         ) : (
           <>
+        {historyTemplates.length > 0 && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+            <Label className="mb-1.5 block">从历史记录带入（可选）</Label>
+            <Select value={historyTemplateId} onValueChange={applyHistoryTemplate}>
+              <SelectTrigger className="bg-background">
+                <History className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="选择以前买过的物资" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[280px]">
+                {historyTemplates.map(order => (
+                  <SelectItem key={order.id} value={order.id}>
+                    {order.itemName} · {order.unit} · {order.purchaseDate}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-1.5 text-xs text-muted-foreground">带入最近一次填写的信息后，可修改本次数量、价格和其他内容；采购日期保持今天，生产日期留空。</p>
+          </div>
+        )}
         <ProductImageField
           imageUrls={form.imageUrls}
           onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
