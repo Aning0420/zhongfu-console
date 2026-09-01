@@ -3,7 +3,7 @@
 3:I[97212,["925","static/chunks/925-a9f28cf5f6595562.js","186","static/chunks/186-4e46068086073daf.js","19","static/chunks/19-4ea568b62c203861.js","653","static/chunks/app/health/page-3b8f28c2534bc961.js"],"default"]
 6:I[1605,[],"OutletBoundary"]
 7:"$Sreact.suspense"
-0:{"buildId":"sN-OnhRffV-l_0agcOelw","rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],null,["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"loading":null,"isPartial":false}
+0:{"buildId":"CX9bJwLvF4_FiaVfoyLxE","rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],null,["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"loading":null,"isPartial":false}
 4:{}
 5:"$0:rsc:props:children:0:props:serverProvidedParams:params"
 8:null
