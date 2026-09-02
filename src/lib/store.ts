@@ -39,6 +39,14 @@ export interface Order {
   productBenefits?: string;
   suitableLifeStages?: string;
   feedingGuidance?: string;
+  // 两层包装换算
+  packConversion?: {
+    outerUnit: string;    // 外层单位，如"盒"
+    outerQuantity: number; // 外层数量，如 1
+    innerUnit: string;    // 内层单位，如"包"
+    innerQuantity: number; // 每外层含内层数量，如 6
+    weightPerInner?: number; // 每内层重量，如 60g
+  };
 }
 
 export interface PriceHistory {
@@ -767,4 +775,59 @@ export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[]
 
   const totalAmount = Array.from(usageByDate.values()).reduce((sum, amount) => sum + amount, 0);
   return roundInventory(totalAmount / usageByDate.size);
+}
+
+// ============ 输入历史记录 ============
+
+const INPUT_HISTORY_KEY = 'zhongfu-input-history';
+
+export interface InputHistory {
+  suppliers: string[];      // 供应商历史
+  categories: string[];     // 分类历史（自定义）
+  units: string[];          // 单位历史
+  itemNames: string[];      // 物品名称历史
+  expenseCategories: string[]; // 支出分类历史
+  expenseDescriptions: string[]; // 支出描述历史
+  hospitals: string[];      // 医院历史
+  doctors: string[];        // 医生历史
+  medications: string[];    // 药品历史
+}
+
+const defaultInputHistory: InputHistory = {
+  suppliers: ['皇家宠物食品', '天猫超市', '京东宠物', '宠物医院'],
+  categories: [],
+  units: ['kg', 'g', '包', '罐', '盒', '袋', '瓶', '支', '片'],
+  itemNames: ['皇家猫粮', '妙鲜包', '猫砂', '化毛膏', '羊奶粉', '逗猫棒'],
+  expenseCategories: ['主粮', '零食', '保健品', '医疗', '日用', '玩具'],
+  expenseDescriptions: [],
+  hospitals: ['爱宠动物医院'],
+  doctors: ['张医生', '李医生'],
+  medications: ['拜耳拜宠清', '化毛膏', '乳铁蛋白', '益生菌'],
+};
+
+export function loadInputHistory(): InputHistory {
+  if (typeof window === 'undefined') return defaultInputHistory;
+  try {
+    const raw = localStorage.getItem(INPUT_HISTORY_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return defaultInputHistory;
+}
+
+export function saveInputHistory(history: InputHistory): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(history));
+}
+
+/** 添加历史记录项（去重，保持最近 20 条） */
+export function addToHistory(field: keyof InputHistory, value: string): void {
+  if (!value || !value.trim()) return;
+  const history = loadInputHistory();
+  const list = history[field] as string[];
+  const trimmed = value.trim();
+  // 移除重复项
+  const filtered = list.filter(v => v !== trimmed);
+  // 添加到开头，保留最近 20 条
+  history[field] = [trimmed, ...filtered].slice(0, 20);
+  saveInputHistory(history);
 }
