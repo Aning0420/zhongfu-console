@@ -13,6 +13,7 @@ interface ChatMessage {
 interface ChatRequest {
   messages?: ChatMessage[];
   image?: string;
+  images?: string[];
   context?: string;
 }
 
@@ -34,7 +35,8 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 ---SYNC_DATA_END---
 
 可用数据类型和字段：
-- procurement: item_name(具体物品名或口味), item_group(系列/大标题，可空), category, quantity, unit, package_size, package_unit, total_price(本次实付总价), supplier, product_benefits, suitable_life_stages, feeding_guidance
+- procurement: item_name(具体物品名或口味), item_group(系列/大标题，可空), category, quantity, unit, package_count, package_count_unit, package_size, package_unit, total_price(本次实付总价), supplier, product_benefits, suitable_life_stages, feeding_guidance
+- procurement_bundle: bundle_name, bundle_quantity, bundle_unit, total_price, supplier, items；items 中每项包含 brand,item_name,item_group,category,quantity,unit
 - expense: category, amount, description, note
 - feeding: meal_type(breakfast/lunch/dinner/snack), food_name, amount, remaining_amount(可选), note
 - feeding_plan: name, active, stages；stage 包含 name,start_date,end_date,description,meals,supplements；meal 包含 time,food,note
@@ -55,8 +57,10 @@ const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助
 - 日期使用 YYYY-MM-DD。住院持续多天时，提取开始和结束日期。
 - 采购分类只能选择：${CATEGORIES.join('、')}。
 - 采购中的 total_price 是整次购买的实付总额，不是单价；例如“1.8kg共109元”应提取 quantity=1.8、unit=kg、total_price=109。采购会由应用自动同步支出，不要再额外生成 expense。
+- “1盒含6包、每包60g”应提取 package_count=6、package_count_unit=包、package_size=60、package_unit=g。
+- 一整盒含多个需要分别管理库存的口味时输出 procurement_bundle：整盒价格只记录一次，items 按图片中可确认的口味和实际数量分别记录，不平均分摊价格。
 - 不确定主食或零食时先追问，不要只凭包装形态判断。
-- 识别商品图片时，可根据包装可见信息填写 product_benefits、suitable_life_stages、feeding_guidance；不确定就留空，不要把包装宣称当成医疗诊断。
+- 综合识别同一消息的全部商品图片，正面、规格、日期、配料表和功能说明互相补充。可根据包装明确标注和配料信息客观整理 product_benefits、suitable_life_stages、feeding_guidance；不能把成分直接推断成治疗功效，包装未标年龄段时留空。任何口味、数量或规格看不清时先追问，不输出同步数据，不允许猜测。
 - 医疗问题给出谨慎建议，并在紧急症状时提示尽快联系兽医。`;
 
 const FEEDING_PLAN_SCHEMA = {
@@ -431,38 +435,44 @@ const worker = {
       }));
       const latest = history.at(-1)?.content || '请分析这张图片';
       const appContext = typeof body.context === 'string' ? body.context.slice(0, 8_000) : '';
+      const imageList = Array.from(new Set([
+        ...(Array.isArray(body.images) ? body.images : []),
+        ...(typeof body.image === 'string' && body.image ? [body.image] : []),
+      ])).slice(0, 4).map(validateImage);
       const contextualPrompt = appContext
         ? `${SYSTEM_PROMPT}\n\n以下是钟福供养办事处当前应用数据摘要，仅用于回答当前问题：\n${appContext}`
         : SYSTEM_PROMPT;
 
       let result: unknown;
-      if (body.image) {
-        const image = validateImage(body.image);
-        const imageQuestion = [
-          `The user's request is: ${latest.slice(0, 2_000)}`,
-          'Inspect the actual image and answer the request using only visible evidence. Transcribe readable brand names, product names, Chinese text, quantities, units, prices, life stages, and feeding instructions exactly as printed. Explicitly leave unreadable or absent fields blank. Do not repeat the request, infer missing details, or claim that you cannot view the image.',
-        ].join('\n\n');
-        const [queryResult, captionResult] = await Promise.all([
-          env.AI.run(VISION_MODEL, {
-            task: 'query',
-            image,
-            question: imageQuestion,
-            reasoning: false,
-            stream: false,
-            max_tokens: 800,
-          }),
-          env.AI.run(VISION_MODEL, {
-            task: 'caption',
-            image,
-            caption_length: 'long',
-            stream: false,
-            max_tokens: 800,
-          }),
-        ]);
-        const imageDescription = [getText(queryResult), getText(captionResult)]
-          .map(value => value.trim())
-          .filter(Boolean)
-          .join('\n\n');
+      if (imageList.length > 0) {
+        const imageDescriptions = await Promise.all(imageList.map(async (image, index) => {
+          const imageQuestion = [
+            `This is image ${index + 1} of ${imageList.length} for the same request: ${latest.slice(0, 2_000)}`,
+            'Inspect the actual image and use only visible evidence. Transcribe readable brand names, product names, flavors, Chinese text, ingredients, quantities, units, prices, production dates, shelf life, life stages, claims, and feeding instructions exactly as printed. Explicitly mark unreadable or absent fields. Do not infer missing details.',
+          ].join('\n\n');
+          const [queryResult, captionResult] = await Promise.all([
+            env.AI.run(VISION_MODEL, {
+              task: 'query',
+              image,
+              question: imageQuestion,
+              reasoning: false,
+              stream: false,
+              max_tokens: 800,
+            }),
+            env.AI.run(VISION_MODEL, {
+              task: 'caption',
+              image,
+              caption_length: 'long',
+              stream: false,
+              max_tokens: 800,
+            }),
+          ]);
+          return [`图片 ${index + 1}`, getText(queryResult), getText(captionResult)]
+            .map(value => value.trim())
+            .filter(Boolean)
+            .join('\n');
+        }));
+        const imageDescription = imageDescriptions.join('\n\n');
         result = await env.AI.run(TEXT_MODEL, {
           messages: [
             { role: 'system', content: contextualPrompt },

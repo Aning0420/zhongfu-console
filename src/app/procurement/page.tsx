@@ -95,10 +95,20 @@ function packageConversionLabel(order: Order): string {
   return parts.join('；');
 }
 
+function bundlePriceLabel(order: Order): string | null {
+  if (!order.purchaseBundleName || !Number.isFinite(order.purchaseBundleTotalPrice)) return null;
+  const quantity = order.purchaseBundleQuantity && order.purchaseBundleQuantity > 0 ? order.purchaseBundleQuantity : 1;
+  return `${order.purchaseBundleName} · ${quantity}${order.purchaseBundleUnit || '套'}共 ¥${(order.purchaseBundleTotalPrice ?? 0).toFixed(2)}`;
+}
+
 function inventoryOperationUnits(order: Order): string[] {
   return [order.unit, order.packageCountUnit, order.packageUnit]
     .filter((unit): unit is string => Boolean(unit?.trim()))
     .filter((unit, index, units) => units.findIndex(item => normalizeHistorySearch(item) === normalizeHistorySearch(unit)) === index);
+}
+
+function countPurchaseRecords(orders: Order[]): number {
+  return new Set(orders.map(order => order.purchaseBatchId || order.id)).size;
 }
 
 function SortableHeader({ field, label, activeField, direction, onSort, className }: {
@@ -286,6 +296,16 @@ export default function ProcurementPage() {
       });
   }, [catOrders, catFeedingRecords, search, statusFilter, categoryFilter, sortField, sortDirection]);
 
+  const purchaseBatchCovers = useMemo(() => {
+    const covers = new Map<string, string>();
+    catOrders.forEach(order => {
+      if (!order.purchaseBatchId || covers.has(order.purchaseBatchId)) return;
+      const cover = order.imageUrls?.[0] || order.imageUrl;
+      if (cover) covers.set(order.purchaseBatchId, cover);
+    });
+    return covers;
+  }, [catOrders]);
+
   // Items expiring within 7 days
   const expiringItems = useMemo(() => {
     return catOrders
@@ -338,17 +358,34 @@ export default function ProcurementPage() {
   }, [catOrders, catFeedingRecords]);
 
   const summary = useMemo(() => {
-    const stockValue = catOrders
-      .filter(o => ['delivered', 'no-repurchase', 'durable'].includes(o.status))
+    const activeStatuses: Order['status'][] = ['delivered', 'no-repurchase', 'durable'];
+    const regularStockValue = catOrders
+      .filter(order => !order.purchaseBatchId && activeStatuses.includes(order.status))
       .reduce((sum, order) => sum + inventoryRemaining(order) * order.unitPrice, 0);
+    const purchaseBatches = new Map<string, Order[]>();
+    catOrders.filter(order => order.purchaseBatchId).forEach(order => {
+      const items = purchaseBatches.get(order.purchaseBatchId as string) || [];
+      items.push(order);
+      purchaseBatches.set(order.purchaseBatchId as string, items);
+    });
+    const bundleStockValue = [...purchaseBatches.values()].reduce((sum, items) => {
+      const totalQuantity = items.reduce((quantity, item) => quantity + item.quantity, 0);
+      if (totalQuantity <= 0) return sum;
+      const activeRemaining = items
+        .filter(item => activeStatuses.includes(item.status))
+        .reduce((quantity, item) => quantity + inventoryRemaining(item), 0);
+      const totalPrice = items[0]?.purchaseBundleTotalPrice ?? 0;
+      return sum + totalPrice * Math.min(1, activeRemaining / totalQuantity);
+    }, 0);
+    const stockValue = regularStockValue + bundleStockValue;
     const lowStock = catOrders.filter(order => {
       if (order.status !== 'delivered' || order.repurchasedAt) return false;
       const ratio = order.quantity > 0 ? inventoryRemaining(order) / order.quantity : 0;
       const depletion = getDepletionInfo(order, catFeedingRecords);
       return ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7);
     }).length;
-    const pending = catOrders.filter(o => o.status === 'pending' || o.status === 'shipped').length;
-    return { stockValue, lowStock, pending, count: catOrders.length };
+    const pending = countPurchaseRecords(catOrders.filter(order => order.status === 'pending' || order.status === 'shipped'));
+    return { stockValue, lowStock, pending, count: countPurchaseRecords(catOrders) };
   }, [catOrders, catFeedingRecords]);
 
   const showOrderFilter = (filter: string) => {
@@ -605,6 +642,8 @@ export default function ProcurementPage() {
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
                 const sourceOrderIndex = state.orders.findIndex(item => item.id === order.id);
                 const showGroupHeading = Boolean(order.itemGroup && filteredOrders[visibleIndex - 1]?.itemGroup !== order.itemGroup);
+                const showBundlePrice = !order.purchaseBatchId || filteredOrders[visibleIndex - 1]?.purchaseBatchId !== order.purchaseBatchId;
+                const coverImage = order.imageUrls?.[0] || order.imageUrl || (order.purchaseBatchId ? purchaseBatchCovers.get(order.purchaseBatchId) : undefined);
                 const priceHistory = getPriceHistory(
                   order.itemName,
                   order.unit,
@@ -617,8 +656,8 @@ export default function ProcurementPage() {
                       {order.brand && <div className="mb-0.5 text-xs font-semibold text-foreground" title={order.brand}>{order.brand}</div>}
                       {showGroupHeading && <div className="mb-1 text-xs font-semibold text-primary" title={order.itemGroup}>{order.itemGroup}</div>}
                       <div className={cn('flex items-center gap-2', (order.brand || order.itemGroup) && 'pl-2')}>
-                        {(order.imageUrls?.[0] || order.imageUrl) ? (
-                          <Image src={order.imageUrls?.[0] || order.imageUrl || ''} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
+                        {coverImage ? (
+                          <Image src={coverImage} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
                         ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
                         <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
@@ -657,9 +696,20 @@ export default function ProcurementPage() {
                       {formatInventoryDailyUsage(dailyUsage, order.unit)}
                     </td>
                     <td className="px-4 py-3 text-foreground">
-                      <div className="whitespace-nowrap font-medium">¥{order.unitPrice.toFixed(2)}/{order.unit}</div>
-                      <div className="whitespace-nowrap text-xs text-muted-foreground">本次共 ¥{orderTotalPrice(order).toFixed(2)}</div>
-                      {priceHistory && <PriceChangeLabel history={priceHistory} />}
+                      {bundlePriceLabel(order) && showBundlePrice ? (
+                        <>
+                          <div className="max-w-[220px] text-xs font-medium leading-5">整盒采购</div>
+                          <div className="max-w-[220px] text-xs leading-5 text-muted-foreground" title={bundlePriceLabel(order) || undefined}>{bundlePriceLabel(order)}</div>
+                        </>
+                      ) : order.purchaseBatchId ? (
+                        <div className="whitespace-nowrap text-xs text-muted-foreground">同一整盒采购</div>
+                      ) : (
+                        <>
+                          <div className="whitespace-nowrap font-medium">¥{order.unitPrice.toFixed(2)}/{order.unit}</div>
+                          <div className="whitespace-nowrap text-xs text-muted-foreground">本次共 ¥{orderTotalPrice(order).toFixed(2)}</div>
+                          {priceHistory && <PriceChangeLabel history={priceHistory} />}
+                        </>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{order.supplier}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.purchaseDate}</td>
@@ -1609,9 +1659,10 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 }
 
 function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
-  const [mode, setMode] = useState<'single' | 'bundle'>('single');
+  const [mode, setMode] = useState<'single' | 'mixed' | 'bundle'>('single');
   const [form, setForm] = useState({
     brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
+    bundleName: '', bundleQuantity: '1', bundleUnit: '盒',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit,
     packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '',
     imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
@@ -1620,6 +1671,10 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [bundleItems, setBundleItems] = useState([
     { id: 'bundle_1', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
     { id: 'bundle_2', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
+  ]);
+  const [mixedFlavors, setMixedFlavors] = useState([
+    { id: 'flavor_1', name: '', quantity: '' },
+    { id: 'flavor_2', name: '', quantity: '' },
   ]);
   const applyHistoryTemplate = (template: Order) => {
     const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
@@ -1653,6 +1708,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, orders);
   const bundleAllocated = bundleItems.reduce((sum, item) => sum + (Number(item.allocatedPrice) || 0), 0);
   const bundleRemaining = Number.isFinite(totalPrice) ? totalPrice - bundleAllocated : 0;
+  const bundleQuantity = Number(form.bundleQuantity);
   const bundleItemsValid = bundleItems.length > 0 && bundleItems.every(item => {
     const itemQuantity = Number(item.quantity);
     const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
@@ -1671,13 +1727,77 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     && form.totalPrice !== ''
     && Number.isFinite(totalPrice)
     && totalPrice >= 0
+    && (!form.bundleName.trim() || (Number.isFinite(bundleQuantity) && bundleQuantity > 0 && Boolean(form.bundleUnit.trim())))
     && bundleItemsValid
     && bundleRemaining >= -0.005
   );
+  const mixedValid = Boolean(
+    form.bundleName.trim()
+    && form.purchaseDate
+    && form.totalPrice !== ''
+    && Number.isFinite(totalPrice)
+    && totalPrice >= 0
+    && Number.isFinite(bundleQuantity)
+    && bundleQuantity > 0
+    && form.bundleUnit.trim()
+    && form.unit.trim()
+    && packageFieldsValid('', '', form.packageSize, form.packageUnit)
+    && mixedFlavors.length > 0
+    && mixedFlavors.every(flavor => flavor.name.trim() && Number.isFinite(Number(flavor.quantity)) && Number(flavor.quantity) > 0)
+  );
 
   const handleSubmit = () => {
+    if (mode === 'mixed') {
+      if (!mixedValid) return;
+      const purchaseBatchId = `bundle-${Date.now()}`;
+      const bundleName = form.bundleName.trim();
+      mixedFlavors.forEach((flavor, index) => onAdd({
+        catId: 'shared',
+        brand: form.brand.trim() || undefined,
+        itemName: flavor.name.trim(),
+        itemGroup: bundleName,
+        purchaseBatchId,
+        purchaseBundleName: bundleName,
+        purchaseBundleQuantity: bundleQuantity,
+        purchaseBundleUnit: form.bundleUnit.trim(),
+        purchaseBundleTotalPrice: totalPrice,
+        category: form.category,
+        quantity: Number(flavor.quantity),
+        unit: form.unit.trim(),
+        unitPrice: 0,
+        totalPrice: 0,
+        purchaseDate: form.purchaseDate,
+        status: 'pending',
+        consumed: 0,
+        supplier: form.supplier.trim(),
+        productionDate: form.productionDate || undefined,
+        shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
+        shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
+        packageSize: form.packageSize ? Number(form.packageSize) : undefined,
+        packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
+        imageUrls: index === 0 && form.imageUrls.length ? form.imageUrls : undefined,
+        imageUrl: index === 0 ? form.imageUrls[0] || undefined : undefined,
+        productBenefits: form.productBenefits.trim() || undefined,
+        suitableLifeStages: form.suitableLifeStages.trim() || undefined,
+        feedingGuidance: form.feedingGuidance.trim() || undefined,
+      }));
+      if (form.syncExpense && totalPrice > 0) {
+        addExpense({
+          catId: 'shared',
+          date: form.purchaseDate,
+          category: form.category,
+          amount: totalPrice,
+          description: `多口味整盒·${bundleName}：${mixedFlavors.map(flavor => flavor.name.trim()).join('、')}`,
+          relatedModule: 'procurement',
+        });
+      }
+      onClose();
+      return;
+    }
     if (mode === 'bundle') {
       if (!bundleValid) return;
+      const purchaseBatchId = `bundle-${Date.now()}`;
+      const bundleName = form.bundleName.trim();
       bundleItems.forEach(item => {
         const itemQuantity = Number(item.quantity);
         const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
@@ -1685,7 +1805,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           catId: 'shared',
           brand: item.brand.trim() || undefined,
           itemName: item.itemName.trim(),
-          itemGroup: item.itemGroup.trim() || undefined,
+          itemGroup: item.itemGroup.trim() || bundleName || undefined,
+          purchaseBatchId,
+          purchaseBundleName: bundleName || '组合采购',
+          purchaseBundleQuantity: bundleQuantity,
+          purchaseBundleUnit: form.bundleUnit.trim() || '单',
+          purchaseBundleTotalPrice: totalPrice,
           category: item.category,
           quantity: itemQuantity,
           unit: item.unit.trim(),
@@ -1721,7 +1846,9 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
             date: form.purchaseDate,
             category: '其他',
             amount: totalPrice,
-            description: `组合采购：${bundleItems.map(item => item.itemName.trim()).join('、')}`,
+            description: bundleName
+              ? `组合采购·${bundleName}：${bundleItems.map(item => item.itemName.trim()).join('、')}`
+              : `组合采购：${bundleItems.map(item => item.itemName.trim()).join('、')}`,
             relatedModule: 'procurement',
           });
         }
@@ -1772,13 +1899,26 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   };
 
   return (
-    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[680px]">
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[760px]">
       <DialogHeader>
         <DialogTitle>新建采购订单</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-2">
-        <div className="grid grid-cols-2 rounded-lg bg-muted/55 p-1" role="tablist" aria-label="采购录入方式">
+        <div className="grid grid-cols-3 rounded-lg bg-muted/55 p-1" role="tablist" aria-label="采购录入方式">
           <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'single' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>单品采购</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'mixed'}
+            onClick={() => {
+              setMode('mixed');
+              setForm(current => ({
+                ...current,
+                category: current.category === '猫粮' ? '主食餐盒' : current.category,
+              }));
+            }}
+            className={cn('h-8 rounded-md px-1 text-sm transition-colors', mode === 'mixed' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}
+          >多口味整盒</button>
           <button type="button" role="tab" aria-selected={mode === 'bundle'} onClick={() => setMode('bundle')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'bundle' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>组合采购</button>
         </div>
         {mode === 'bundle' ? (
@@ -1796,6 +1936,31 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                 <Label>整单实付(¥)</Label>
                 <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={event => setForm(current => ({ ...current, totalPrice: event.target.value }))} placeholder="如：199.90" />
               </div>
+            </div>
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_100px_110px]">
+                <div className="space-y-1.5">
+                  <Label>混合装 / 整盒名称（可选）</Label>
+                  <HistoryTextAutocomplete
+                    value={form.bundleName}
+                    values={[
+                      ...recentOrderValues(orders, item => item.purchaseBundleName),
+                      ...recentOrderValues(orders, item => item.itemGroup),
+                    ]}
+                    onChange={bundleName => setForm(current => ({ ...current, bundleName }))}
+                    placeholder="如：主食餐盒混合装"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>整装数量</Label>
+                  <Input type="number" min="0" step="any" value={form.bundleQuantity} onChange={event => setForm(current => ({ ...current, bundleQuantity: event.target.value }))} placeholder="1" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>外包装单位</Label>
+                  <HistoryTextAutocomplete value={form.bundleUnit} values={recentOrderValues(orders, item => item.purchaseBundleUnit)} onChange={bundleUnit => setForm(current => ({ ...current, bundleUnit }))} placeholder="盒/箱/套" />
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">整盒价格填上方“整单实付”；下面每个口味分别填写实际数量，分摊金额可以全部留空。</p>
             </div>
             <div className="space-y-2">
               {bundleItems.map((item, index) => (
@@ -1878,6 +2043,165 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">不知道单品价格可以不填分摊金额，库存仍会正常入库；系统只记录一笔整单支出，不会虚构单价。</p>
             </div>
+          </>
+        ) : mode === 'mixed' ? (
+          <>
+            <ProductImageField
+              imageUrls={form.imageUrls}
+              onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
+              onAnalysis={analysis => setForm(current => {
+                const analyzed = applyProductAnalysis(current, analysis);
+                return {
+                  ...analyzed,
+                  bundleName: current.bundleName || analysis.itemGroup || analysis.itemName || '',
+                  itemName: current.itemName,
+                  quantity: current.quantity,
+                  unit: current.unit,
+                };
+              })}
+            />
+
+            <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <div>
+                <Label>整盒共享信息</Label>
+                <p className="mt-1 text-xs text-muted-foreground">以下内容只填一次，会应用到下面所有口味；整盒价格不会平均成各口味单价。</p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>品牌（可选）</Label>
+                  <HistoryTextAutocomplete value={form.brand} values={recentOrderValues(orders, item => item.brand)} onChange={brand => setForm(current => ({ ...current, brand }))} placeholder="如：帕特" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>整盒 / 系列名称</Label>
+                  <HistoryTextAutocomplete
+                    value={form.bundleName}
+                    values={[
+                      ...recentOrderValues(orders, item => item.purchaseBundleName),
+                      ...recentOrderValues(orders, item => item.itemGroup),
+                    ]}
+                    onChange={bundleName => setForm(current => ({ ...current, bundleName }))}
+                    placeholder="如：幼猫主食餐盒混合装"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>分类</Label>
+                  <Select value={form.category} onValueChange={category => setForm(current => ({ ...current, category }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><InventoryCategoryOptions /></SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>商家 / 直播间（可选）</Label>
+                  <HistoryTextAutocomplete value={form.supplier} values={recentOrderValues(orders, item => item.supplier)} onChange={supplier => setForm(current => ({ ...current, supplier }))} placeholder="如：抖音直播间" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>采购日期</Label>
+                  <Input type="date" value={form.purchaseDate} onChange={event => setForm(current => ({ ...current, purchaseDate: event.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>购买整盒数量</Label>
+                  <Input type="number" min="0" step="any" value={form.bundleQuantity} onChange={event => setForm(current => ({ ...current, bundleQuantity: event.target.value }))} placeholder="如：1" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>外包装单位</Label>
+                  <HistoryTextAutocomplete value={form.bundleUnit} values={recentOrderValues(orders, item => item.purchaseBundleUnit)} onChange={bundleUnit => setForm(current => ({ ...current, bundleUnit }))} placeholder="盒/箱/套" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>整盒实付(¥)</Label>
+                  <Input type="number" min="0" step="0.01" value={form.totalPrice} onChange={event => setForm(current => ({ ...current, totalPrice: event.target.value }))} placeholder="如：199.90" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>单个库存单位</Label>
+                  <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => item.unit)} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="餐盒/罐/包" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>每个容量（可选）</Label>
+                  <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：80" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>容量单位</Label>
+                  <HistoryTextAutocomplete value={form.packageUnit} values={recentOrderValues(orders, item => item.packageUnit)} onChange={packageUnit => setForm(current => ({ ...current, packageUnit }))} placeholder="g/ml/片" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>生产日期（可选）</Label>
+                  <Input type="date" value={form.productionDate} onChange={event => setForm(current => ({ ...current, productionDate: event.target.value }))} />
+                </div>
+                <ShelfLifeField
+                  label="保质期（可选）"
+                  value={form.shelfLife}
+                  unit={form.shelfLifeUnit}
+                  onValueChange={shelfLife => setForm(current => ({ ...current, shelfLife }))}
+                  onUnitChange={shelfLifeUnit => setForm(current => ({ ...current, shelfLifeUnit }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <Label>口味库存</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">这里只填写不同口味和实际个数。</p>
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  合计 {mixedFlavors.reduce((sum, flavor) => sum + (Number(flavor.quantity) || 0), 0)}{form.unit.trim() || '个'}
+                </span>
+              </div>
+              {mixedFlavors.map((flavor, index) => (
+                <div key={flavor.id} className="grid grid-cols-[minmax(0,1fr)_92px_36px] items-end gap-2 rounded-lg border border-border/70 p-2.5">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">口味 {index + 1}</Label>
+                    <HistoryTextAutocomplete
+                      value={flavor.name}
+                      values={recentOrderValues(orders, item => item.itemName)}
+                      onChange={name => setMixedFlavors(current => current.map(entry => entry.id === flavor.id ? { ...entry, name } : entry))}
+                      placeholder="如：鸡肉味"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">数量</Label>
+                    <Input type="number" min="0" step="any" value={flavor.quantity} onChange={event => setMixedFlavors(current => current.map(entry => entry.id === flavor.id ? { ...entry, quantity: event.target.value } : entry))} placeholder="0" />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setMixedFlavors(current => current.filter(entry => entry.id !== flavor.id))}
+                    disabled={mixedFlavors.length === 1}
+                    className="text-destructive"
+                    title="删除口味"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setMixedFlavors(current => [...current, { id: `flavor_${Date.now()}_${current.length}`, name: '', quantity: '' }])}
+                className="w-full"
+              >
+                <Plus className="h-3.5 w-3.5" />添加口味
+              </Button>
+            </div>
+
+            <ProductInfoFields
+              benefits={form.productBenefits}
+              suitableLifeStages={form.suitableLifeStages}
+              feedingGuidance={form.feedingGuidance}
+              benefitsHistory={recentOrderValues(orders, item => item.productBenefits)}
+              lifeStageHistory={recentOrderValues(orders, item => item.suitableLifeStages)}
+              feedingGuidanceHistory={recentOrderValues(orders, item => item.feedingGuidance)}
+              onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
+            />
           </>
         ) : (
           <>
@@ -1996,12 +2320,18 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2.5">
           <Checkbox id="sync-expense" checked={form.syncExpense} onCheckedChange={v => setForm(p => ({ ...p, syncExpense: !!v }))} />
           <label htmlFor="sync-expense" className="text-sm text-muted-foreground cursor-pointer select-none">
-            同步记录{mode === 'bundle' ? '整单' : '购物'}支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number.isFinite(totalPrice) ? totalPrice : 0).toFixed(2)}）
+            同步记录{mode === 'mixed' ? '整盒' : mode === 'bundle' ? '整单' : '购物'}支出到<span className="text-foreground font-medium">支出记账</span>（¥{(Number.isFinite(totalPrice) ? totalPrice : 0).toFixed(2)}）
           </label>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button disabled={mode === 'bundle' && !bundleValid} onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground">{mode === 'bundle' ? `添加 ${bundleItems.length} 项库存` : '确认添加'}</Button>
+          <Button
+            disabled={(mode === 'bundle' && !bundleValid) || (mode === 'mixed' && !mixedValid)}
+            onClick={handleSubmit}
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+          >
+            {mode === 'bundle' ? `添加 ${bundleItems.length} 项库存` : mode === 'mixed' ? `添加 ${mixedFlavors.length} 个口味库存` : '确认添加'}
+          </Button>
         </div>
       </div>
     </DialogContent>

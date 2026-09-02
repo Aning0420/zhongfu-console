@@ -77,8 +77,13 @@ export default function FeedingPage() {
   const foodSuggestions = useMemo(() => Array.from(new Set(
     catOrders
       .filter(order => !['cancelled', 'finished', 'durable'].includes(order.status))
-      .map(order => [order.itemGroup, order.itemName].filter(Boolean).join(' · ').trim())
-      .filter(Boolean)
+      .flatMap(order => {
+        const seriesName = order.itemGroup
+          ? [order.brand, order.itemGroup].filter(Boolean).join(' · ').trim()
+          : '';
+        const itemName = [order.brand, order.itemGroup, order.itemName].filter(Boolean).join(' · ').trim();
+        return [seriesName, itemName].filter(Boolean);
+      })
   )), [catOrders]);
   const activePlans = useMemo(() => catPlans.filter(plan => plan.active), [catPlans]);
 
@@ -533,7 +538,7 @@ function AddFeedingDialog({ defaultDate, foodSuggestions, onClose, onAdd }: { de
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>食物名称</Label>
-            <InventoryFoodInput value={form.foodName} onChange={foodName => setForm(p => ({ ...p, foodName }))} suggestions={foodSuggestions} placeholder="输入关键词，选择采购登记名称" />
+            <InventoryFoodInput value={form.foodName} onChange={foodName => setForm(p => ({ ...p, foodName }))} suggestions={foodSuggestions} placeholder="输入名称或系列，选择库存物资" />
           </div>
           <div className="space-y-1.5">
             <Label>用量</Label>

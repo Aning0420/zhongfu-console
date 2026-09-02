@@ -7,12 +7,14 @@ import { useAppContext } from './providers';
 import { cn } from '@/lib/utils';
 import { inventoryRemaining, type AppState, type CareReminder, type DailyObservation } from '@/lib/store';
 import { localDateKey } from '@/lib/local-date';
+import { compressProductImage } from '@/lib/product-image';
 
 interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   imageUrl?: string;
+  imageUrls?: string[];
   synced?: boolean;
   timestamp: Date;
 }
@@ -25,6 +27,7 @@ const QUICK_REPLIES = [
 const STATIC_MODE = process.env.NEXT_PUBLIC_STATIC_MODE === '1';
 const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '/api/chat';
 const AI_ENABLED = !STATIC_MODE || Boolean(process.env.NEXT_PUBLIC_CHAT_API_URL);
+const MAX_CHAT_IMAGES = 4;
 
 let _msgId = 5000;
 function genMsgId(): string {
@@ -183,7 +186,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -219,25 +222,21 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
   }, []);
 
   // Handle image file selection
-  const handleImageSelect = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPendingImage(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+  const handleImageSelect = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter(file => file.type.startsWith('image/')).slice(0, MAX_CHAT_IMAGES);
+    if (imageFiles.length === 0) return;
+    const compressed = await Promise.all(imageFiles.map(file => compressProductImage(file)));
+    setPendingImages(current => [...current, ...compressed].slice(0, MAX_CHAT_IMAGES));
   }, []);
 
   // Handle paste event for images
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData.items;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile();
-        if (file) handleImageSelect(file);
-        break;
-      }
-    }
+    const files = Array.from(items)
+      .filter(item => item.type.startsWith('image/'))
+      .map(item => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (files.length > 0) void handleImageSelect(files);
   }, [handleImageSelect]);
 
   // Sync data to app modules
@@ -245,6 +244,50 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
     const today = localDateKey();
 
     switch (syncData.type) {
+      case 'procurement_bundle': {
+        const d = syncData.data;
+        const items = Array.isArray(d.items) ? d.items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
+        const bundleName = String(d.bundle_name || '混合装采购').trim();
+        const bundleQuantity = Number(d.bundle_quantity) > 0 ? Number(d.bundle_quantity) : 1;
+        const bundleUnit = String(d.bundle_unit || '盒').trim();
+        const totalPrice = Number(d.total_price) || 0;
+        const purchaseBatchId = `bundle-${Date.now()}`;
+        items.forEach(item => {
+          const itemQuantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+          addOrder({
+            catId: 'shared',
+            brand: String(item.brand || '').trim() || undefined,
+            itemName: String(item.item_name || '未知口味').trim(),
+            itemGroup: String(item.item_group || bundleName).trim() || undefined,
+            purchaseBatchId,
+            purchaseBundleName: bundleName,
+            purchaseBundleQuantity: bundleQuantity,
+            purchaseBundleUnit: bundleUnit,
+            purchaseBundleTotalPrice: totalPrice,
+            category: normalizeInventoryCategory(item.category),
+            quantity: itemQuantity,
+            unit: String(item.unit || '个').trim(),
+            unitPrice: 0,
+            totalPrice: 0,
+            supplier: String(d.supplier || '线上').trim(),
+            purchaseDate: today,
+            status: 'delivered',
+            consumed: 0,
+          });
+        });
+        if (totalPrice > 0 && items.length > 0) {
+          const categories = new Set(items.map(item => normalizeInventoryCategory(item.category)));
+          addExpense({
+            catId: 'shared',
+            category: categories.size === 1 ? [...categories][0] : '其他',
+            amount: totalPrice,
+            description: `组合采购·${bundleName}：${items.map(item => String(item.item_name || '未知口味')).join('、')}`,
+            date: today,
+            relatedModule: 'procurement',
+          });
+        }
+        break;
+      }
       case 'procurement': {
         const d = syncData.data;
         const quantity = Number(d.quantity) || 1;
@@ -502,9 +545,9 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
   }, [targetCatId, state.feedingPlans, state.healthRecords, addOrder, addFeedingRecord, addFeedingPlan, updateFeedingPlan, addHealthRecord, updateHealthRecord, addExpense]);
 
   // Send message with streaming
-  const sendMessage = useCallback(async (content: string, image?: string) => {
+  const sendMessage = useCallback(async (content: string, images: string[] = []) => {
     if (!AI_ENABLED) return;
-    if (!content.trim() && !image) return;
+    if (!content.trim() && images.length === 0) return;
     setLoading(true);
 
     const userMsgId = genMsgId();
@@ -512,7 +555,8 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       id: userMsgId,
       role: 'user',
       content: content.trim(),
-      imageUrl: image,
+      imageUrl: images[0],
+      imageUrls: images,
       timestamp: new Date(),
     };
 
@@ -526,7 +570,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setInput('');
-    setPendingImage(null);
+    setPendingImages([]);
 
     let savedAssistantContent = '';
     const controller = new AbortController();
@@ -542,7 +586,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
       const res = await fetch(CHAT_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, image, context: buildAssistantContext({ ...state, activeCatId: targetCatId }) }),
+        body: JSON.stringify({ messages: apiMessages, images, context: buildAssistantContext({ ...state, activeCatId: targetCatId }) }),
         signal: controller.signal,
       });
 
@@ -629,8 +673,8 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
   }, [messages, state, targetCatId, syncData, addChatMessages]);
 
   const handleSubmit = useCallback(() => {
-    sendMessage(input, pendingImage || undefined);
-  }, [input, pendingImage, sendMessage]);
+    sendMessage(input, pendingImages);
+  }, [input, pendingImages, sendMessage]);
 
   const handleClear = useCallback(() => {
     setMessages([]);
@@ -719,9 +763,11 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                       : 'bg-[#E8F4FD] text-[#2D3E50] rounded-bl-md'
                   )}
                 >
-                  {msg.imageUrl && (
-                    <div className="mb-2 rounded-lg overflow-hidden">
-                      <img src={msg.imageUrl} alt="uploaded" className="max-w-full max-h-40 object-cover" />
+                  {(msg.imageUrls?.length || msg.imageUrl) && (
+                    <div className="mb-2 grid grid-cols-2 gap-1 overflow-hidden rounded-lg">
+                      {(msg.imageUrls?.length ? msg.imageUrls : [msg.imageUrl as string]).map((image, index) => (
+                        <img key={`${msg.id}-image-${index}`} src={image} alt={`已上传图片 ${index + 1}`} className="h-24 w-full object-cover" />
+                      ))}
                     </div>
                   )}
                   {msg.content ? (
@@ -760,16 +806,22 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           )}
 
           {/* Image preview */}
-          {pendingImage && (
+          {pendingImages.length > 0 && (
             <div className="px-4 pb-2">
-              <div className="relative inline-block">
-                <img src={pendingImage} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-[#D6E8F5]" />
-                <button
-                  onClick={() => setPendingImage(null)}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#E88888] text-white flex items-center justify-center"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+              <div className="mb-1 text-[10px] text-[#6B8A9E]">已选择 {pendingImages.length}/{MAX_CHAT_IMAGES} 张</div>
+              <div className="flex flex-wrap gap-2">
+                {pendingImages.map((image, index) => (
+                  <div key={`pending-${index}`} className="relative inline-block">
+                    <img src={image} alt={`待发送图片 ${index + 1}`} className="h-16 w-16 rounded-lg border border-[#D6E8F5] object-cover" />
+                    <button
+                      onClick={() => setPendingImages(current => current.filter((_, imageIndex) => imageIndex !== index))}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#E88888] text-white"
+                      aria-label={`移除第 ${index + 1} 张图片`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -781,18 +833,19 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleImageSelect(file);
+                  const files = Array.from(e.target.files || []);
+                  if (files.length > 0) void handleImageSelect(files);
                   e.target.value = '';
                 }}
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!AI_ENABLED}
+                disabled={!AI_ENABLED || pendingImages.length >= MAX_CHAT_IMAGES}
                 className="w-9 h-9 rounded-full hover:bg-[#E8F4FD] text-[#6B8A9E] hover:text-[#5CB8E4] transition-colors flex items-center justify-center shrink-0"
-                title="上传图片"
+                title="上传图片（最多4张）"
               >
                 <ImagePlus className="w-4.5 h-4.5" />
               </button>
@@ -813,10 +866,10 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
               />
               <button
                 onClick={handleSubmit}
-                disabled={!AI_ENABLED || loading || (!input.trim() && !pendingImage)}
+                disabled={!AI_ENABLED || loading || (!input.trim() && pendingImages.length === 0)}
                 className={cn(
                   'w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all',
-                  input.trim() || pendingImage
+                  input.trim() || pendingImages.length > 0
                     ? 'bg-[#5CB8E4] text-white hover:bg-[#4AA8D4]'
                     : 'bg-[#E8F4FD] text-[#6B8A9E]/50'
                 )}

@@ -28,6 +28,11 @@ const SYSTEM_PROMPT = `你是"钟福供养办事处"的猫咪管理助手，负�
 {"type":"procurement","data":{"brand":"品牌或空字符串","item_name":"具体物品名或口味","item_group":"系列/大标题或空字符串","category":"物品细分类","quantity":数量,"unit":"库存单位","package_count":每个库存单位内含的中间包装数量或null,"package_count_unit":"包/袋/板等中间单位或空字符串","package_size":每个中间包装内含的最小单位数量或null,"package_unit":"片/粒/g等最小单位或空字符串","total_price":本次实付总价,"supplier":"供应商","product_benefits":"包装宣称或常见用途","suitable_life_stages":"适合的猫咪阶段","feeding_guidance":"按包装和兽医建议整理的喂食提示"}}
 ---SYNC_DATA_END---
 
+### 混合装 / 多口味整盒采购
+---SYNC_DATA_START---
+{"type":"procurement_bundle","data":{"bundle_name":"整盒或套装名称","bundle_quantity":整装数量,"bundle_unit":"盒/箱/套","total_price":整单实付总价,"supplier":"供应商","items":[{"brand":"品牌或空字符串","item_name":"具体口味或物品名称","item_group":"系列/大标题","category":"物品细分类","quantity":该口味实际数量,"unit":"餐盒/罐/包等库存单位"}]}}
+---SYNC_DATA_END---
+
 ### 支出录入
 ---SYNC_DATA_START---
 {"type":"expense","data":{"category":"分类","amount":金额,"description":"描述","note":"备注"}}
@@ -66,12 +71,14 @@ const SYSTEM_PROMPT = `你是"钟福供养办事处"的猫咪管理助手，负�
 ## 规则
 - 采购中的 total_price 是整次购买的实付总额，不是单价；例如“1.8kg共109元”应提取 quantity=1.8、unit=kg、total_price=109
 - 多层包装要完整提取；例如“1盒，盒内6包，每包60g”应提取 quantity=1、unit=盒、package_count=6、package_count_unit=包、package_size=60、package_unit=g
+- 一整盒中含多个需要分别管理库存的口味时，必须输出 procurement_bundle；bundle 只记录一次整盒总价，items 按口味分别记录实际数量，不要猜测或平均分摊各口味价格
 - 药品优先按实际消耗的最小单位入库；例如“1盒速诺，每盒20片”优先提取 quantity=20、unit=片，package_size=null、package_unit=""，这样每次0.5片可以直接扣减；只有用户明确要求按盒管理时才使用包装换算
 - 采购会由应用自动同步支出，不要再额外生成一条支出数据
 - 如果信息不完整（如没提总价），用合理默认值（总价设为0）
 - 回复要友好自然，告知用户已录入什么数据
 - 如果用户只是闲聊或查询，不需要输出同步数据
 - 如果用户发了图片，仔细识别图片内容（物品、文字、数字等），并据此录入数据
+- 图片中如果是一整盒多口味商品，逐一读取每个可见口味和数量并输出 procurement_bundle；结合用户随图片补充的整盒实付价格。任何口味、数量或规格看不清时必须先列出待确认项，不输出同步数据，不允许猜测
 - 识别商品图片时，采购数据可额外填写 product_benefits、suitable_life_stages、feeding_guidance；这些只能根据包装可见信息整理，不确定就留空，不要把包装宣称当成医疗诊断
 - 住院或连续治疗要提取开始和结束日期；用户只说持续天数时，根据开始日期计算包含首尾的结束日期
 - 用户要求制定、添加或修改喂食安排时，输出 feeding_plan；每个阶段至少包含一餐
@@ -83,7 +90,11 @@ const SYSTEM_PROMPT = `你是"钟福供养办事处"的猫咪管理助手，负�
 - 判断主食或零食时以包装上的营养用途为准；无法判断的湿粮优先根据用户原话追问，不要把包装形态当作营养用途`;
 
 export async function POST(request: NextRequest) {
-  const { messages, image } = await request.json();
+  const { messages, image, images } = await request.json();
+  const imageList = Array.from(new Set([
+    ...(Array.isArray(images) ? images : []),
+    ...(typeof image === 'string' && image ? [image] : []),
+  ].filter((item): item is string => typeof item === 'string' && Boolean(item)))).slice(0, 4);
   const { LLMClient, Config, HeaderUtils } = await import("coze-coding-dev-sdk");
   const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
 
@@ -106,12 +117,12 @@ export async function POST(request: NextRequest) {
   // Add current user message with optional image
   const currentMsg = messages[messages.length - 1];
   if (currentMsg?.role === "user") {
-    if (image) {
+    if (imageList.length > 0) {
       llmMessages.push({
         role: "user",
         content: [
-          { type: "text", text: currentMsg.content || "请识别这张图片中的内容" },
-          { type: "image_url", image_url: { url: image, detail: "high" } },
+          { type: "text", text: currentMsg.content || "请综合识别这些图片中的同一件商品或混合装内容" },
+          ...imageList.map(url => ({ type: "image_url" as const, image_url: { url, detail: "high" as const } })),
         ],
       });
     } else if (!historyMessages.includes(currentMsg)) {

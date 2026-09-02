@@ -277,7 +277,7 @@ function PlanEditorDialog({ plan, foodSuggestions, onClose, onSave }: {
                     <div key={`${stage.id}-meal-${mealIndex}`} className="rounded-md border border-border/70 p-3">
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-[100px_minmax(0,1fr)_32px]">
                         <Input type="time" value={meal.time} onChange={event => updateMeal(stageIndex, mealIndex, 'time', event.target.value)} aria-label={`第 ${mealIndex + 1} 餐时间`} />
-                        <InventoryFoodInput value={meal.food} onChange={value => updateMeal(stageIndex, mealIndex, 'food', value)} suggestions={foodSuggestions} placeholder="输入关键词，选择采购登记名称" ariaLabel={`第 ${mealIndex + 1} 餐食物`} />
+                        <InventoryFoodInput value={meal.food} onChange={value => updateMeal(stageIndex, mealIndex, 'food', value)} suggestions={foodSuggestions} placeholder="输入名称或系列，选择库存物资" ariaLabel={`第 ${mealIndex + 1} 餐食物`} />
                         <Button variant="ghost" size="icon" disabled={stage.mealSchedule.length <= 1} onClick={() => removeMeal(stageIndex, mealIndex)} className="text-destructive" title="删除餐次"><Trash2 className="w-3.5 h-3.5" /></Button>
                       </div>
                       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">

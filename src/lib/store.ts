@@ -8,6 +8,12 @@ export interface Order {
   itemName: string;
   /** Optional series/group heading shared by related flavors or variants. */
   itemGroup?: string;
+  /** Shared purchase batch metadata for mixed-flavor boxes and assorted bundles. */
+  purchaseBatchId?: string;
+  purchaseBundleName?: string;
+  purchaseBundleQuantity?: number;
+  purchaseBundleUnit?: string;
+  purchaseBundleTotalPrice?: number;
   category: string;
   quantity: number;
   unit: string;
@@ -127,11 +133,11 @@ interface ParsedAmount {
   unit: string;
 }
 
-const AMOUNT_PATTERN = /(\d+(?:\.\d+)?)\s*(kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/i;
+const AMOUNT_PATTERN = /(\d+(?:\.\d+)?)\s*(kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|餐盒|餐包|罐|包|袋|盒|支|条|片|粒|份|个)/i;
 
 function normalizeStockProductName(value: string): string {
   return normalizeProductIdentity(
-    value.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '')
+    value.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|餐盒|餐包|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '')
   );
 }
 
@@ -165,7 +171,7 @@ function parseAmount(value?: string): ParsedAmount | null {
     const amount = Number(match[1]);
     return Number.isFinite(amount) && amount > 0 ? { value: amount, unit: match[2].toLowerCase() } : null;
   }
-  const halfMatch = value?.match(/半\s*(kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/i);
+  const halfMatch = value?.match(/半\s*(kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|餐盒|餐包|罐|包|袋|盒|支|条|片|粒|份|个)/i);
   return halfMatch ? { value: 0.5, unit: halfMatch[1].toLowerCase() } : null;
 }
 
@@ -176,6 +182,8 @@ function unitInfo(rawUnit: string): { family: string; factor: number; unit: stri
   if (['mg', '毫克'].includes(unit)) return { family: 'mass', factor: 0.001, unit: 'mg' };
   if (['l', '升'].includes(unit)) return { family: 'volume', factor: 1000, unit: 'l' };
   if (['ml', '毫升'].includes(unit)) return { family: 'volume', factor: 1, unit: 'ml' };
+  if (['盒', '餐盒'].includes(unit)) return { family: 'count:盒', factor: 1, unit: '盒' };
+  if (['包', '餐包'].includes(unit)) return { family: 'count:包', factor: 1, unit: '包' };
   return { family: `count:${unit}`, factor: 1, unit };
 }
 
@@ -280,23 +288,39 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
     identities.add(normalizeStockProductName(order.itemName));
     identitiesByKind.set(kind, identities);
   });
+  const explicitlyMatchedSeries = new Set(
+    eligibleOrders
+      .filter(order => {
+        const itemKey = normalizeStockProductName(order.itemName);
+        return Boolean(itemKey && normalizedSource.includes(itemKey));
+      })
+      .map(order => normalizeStockProductName(order.itemGroup || ''))
+      .filter(Boolean)
+  );
   const groups = new Map<string, { name: string; orders: Order[]; position: number; matchToken: string }>();
 
   eligibleOrders.forEach(order => {
     const key = normalizeStockProductName(order.itemName);
+    const seriesKey = normalizeStockProductName(order.itemGroup || '');
     const kind = stockProductKind(order.itemName);
     const exactMatch = Boolean(key && normalizedSource.includes(key));
+    const seriesMatch = Boolean(
+      seriesKey
+      && normalizedSource.includes(seriesKey)
+      && !explicitlyMatchedSeries.has(seriesKey)
+    );
     const kindMatch = Boolean(kind && normalizedSource.includes(kind));
     const distinctiveMatch = kindMatch && hasDistinctiveOverlap(key, normalizedSource, kind);
     const uniqueKindMatch = kindMatch && identitiesByKind.get(kind)?.size === 1;
     // Generic names only match when there is one unambiguous stocked product of that kind.
-    if (!exactMatch && !distinctiveMatch && !uniqueKindMatch) return;
-    const current = groups.get(key);
-    const matchToken = exactMatch ? key : kind;
+    if (!exactMatch && !seriesMatch && !distinctiveMatch && !uniqueKindMatch) return;
+    const groupKey = seriesMatch ? `series:${seriesKey}` : `item:${key}`;
+    const current = groups.get(groupKey);
+    const matchToken = exactMatch ? key : seriesMatch ? seriesKey : kind;
     const position = normalizedSource.indexOf(matchToken);
     if (current) current.orders.push(order);
-    else groups.set(key, {
-      name: order.itemName,
+    else groups.set(groupKey, {
+      name: seriesMatch ? order.itemGroup as string : order.itemName,
       orders: [order],
       position: position < 0 ? Number.MAX_SAFE_INTEGER : position,
       matchToken,
@@ -306,7 +330,7 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
   const usages = Array.from(groups.values())
     .sort((a, b) => a.position - b.position || b.name.length - a.name.length)
     .map((group, index, allGroups) => {
-      const displayName = group.name.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '').trim();
+      const displayName = group.name.replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|餐盒|餐包|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '').trim();
       const sourceLower = source.toLocaleLowerCase('zh-CN');
       const literalName = displayName.toLocaleLowerCase('zh-CN');
       const literalIndex = sourceLower.indexOf(literalName);
@@ -338,7 +362,7 @@ export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]
     group.orders
       .slice()
       .sort((a, b) => {
-        const priority = { delivered: 0, shipped: 1, pending: 2 } as const;
+        const priority = { delivered: 0, 'no-repurchase': 1, shipped: 2, pending: 3 } as const;
         return priority[a.status as keyof typeof priority] - priority[b.status as keyof typeof priority]
           || a.purchaseDate.localeCompare(b.purchaseDate)
           || a.id.localeCompare(b.id);
@@ -723,7 +747,7 @@ function feedingUsageAmount(itemName: string, record: FeedingRecord): ParsedAmou
   }
 
   const displayName = itemName
-    .replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '')
+    .replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|千克|mg|毫克|g|克|ml|毫升|l|升|餐盒|餐包|罐|包|袋|盒|支|条|片|粒|份|个)/gi, '')
     .trim();
   const sourceLower = source.toLocaleLowerCase('zh-CN');
   const literalName = displayName.toLocaleLowerCase('zh-CN');
@@ -757,13 +781,29 @@ function feedingUsageAmount(itemName: string, record: FeedingRecord): ParsedAmou
 export function calcDailyUsage(itemName: string, feedingRecords: FeedingRecord[], targetUnit?: string, order?: Order): number {
   const usages = feedingRecords
     .filter(record => record.completed)
-    .map(record => ({ record, amount: feedingUsageAmount(itemName, record) }))
-    .filter((entry): entry is { record: FeedingRecord; amount: ParsedAmount } => Boolean(entry.amount));
+    .map(record => {
+      const deductedAmount = order
+        ? (record.inventoryDeductions || [])
+          .filter(deduction => deduction.orderId === order.id)
+          .reduce((sum, deduction) => {
+            const converted = deduction.unit
+              ? convertInventoryAmount(deduction.amount, deduction.unit, order.unit)
+              : deduction.amount;
+            return sum + (converted ?? 0);
+          }, 0)
+        : 0;
+      return deductedAmount > 0
+        ? { record, amount: { value: deductedAmount, unit: order?.unit || targetUnit || '' }, alreadyInTargetUnit: true }
+        : { record, amount: feedingUsageAmount(itemName, record), alreadyInTargetUnit: false };
+    })
+    .filter((entry): entry is { record: FeedingRecord; amount: ParsedAmount; alreadyInTargetUnit: boolean } => Boolean(entry.amount));
   if (usages.length < 2) return 0;
 
   const usageByDate = new Map<string, number>();
-  usages.forEach(({ record, amount }) => {
-    const converted = order
+  usages.forEach(({ record, amount, alreadyInTargetUnit }) => {
+    const converted = alreadyInTargetUnit
+      ? amount.value
+      : order
       ? convertUsageToInventoryAmount(order, amount.value, amount.unit)
       : targetUnit
         ? convertInventoryAmount(amount.value, amount.unit, targetUnit)
