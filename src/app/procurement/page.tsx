@@ -80,6 +80,27 @@ function productDisplayName(order: Order): string {
   return [order.brand, order.itemName].filter(Boolean).join(' ');
 }
 
+function packageConversionLabel(order: Order): string {
+  const parts: string[] = [];
+  if (order.packageCount && order.packageCountUnit) {
+    parts.push(`1${order.unit} = ${order.packageCount}${order.packageCountUnit}`);
+  }
+  if (order.packageSize && order.packageUnit) {
+    const sourceUnit = order.packageCount && order.packageCountUnit ? order.packageCountUnit : order.unit;
+    parts.push(`1${sourceUnit} = ${order.packageSize}${order.packageUnit}`);
+    if (order.packageCount && order.packageCountUnit) {
+      parts.push(`每${order.unit}共${order.packageCount * order.packageSize}${order.packageUnit}`);
+    }
+  }
+  return parts.join('；');
+}
+
+function inventoryOperationUnits(order: Order): string[] {
+  return [order.unit, order.packageCountUnit, order.packageUnit]
+    .filter((unit): unit is string => Boolean(unit?.trim()))
+    .filter((unit, index, units) => units.findIndex(item => normalizeHistorySearch(item) === normalizeHistorySearch(unit)) === index);
+}
+
 function SortableHeader({ field, label, activeField, direction, onSort, className }: {
   field: SortField;
   label: string;
@@ -628,8 +649,8 @@ export default function ProcurementPage() {
                           {remaining}{order.unit}
                         </span>
                       </div>
-                      {order.packageSize && order.packageUnit && (
-                        <div className="mt-1 whitespace-nowrap text-[10px] text-muted-foreground">1{order.unit} = {order.packageSize}{order.packageUnit}</div>
+                      {packageConversionLabel(order) && (
+                        <div className="mt-1 whitespace-nowrap text-[10px] text-muted-foreground">{packageConversionLabel(order)}</div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
@@ -782,22 +803,23 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
   onConfirm: (amount: number) => void;
 }) {
   const remaining = inventoryRemaining(order);
-  const hasSecondaryUnit = Boolean(order.packageSize && order.packageUnit);
+  const operationUnits = inventoryOperationUnits(order);
+  const hasAlternativeUnits = operationUnits.length > 1;
   const [inputUnit, setInputUnit] = useState(order.unit);
   const maximumInPrimaryUnit = mode === 'consume' ? remaining : order.consumed;
-  const maximum = inputUnit === order.unit || !hasSecondaryUnit
+  const maximum = inputUnit === order.unit || !hasAlternativeUnits
     ? maximumInPrimaryUnit
-    : convertInventoryToUsageAmount(order, maximumInPrimaryUnit, order.packageUnit as string) || 0;
+    : convertInventoryToUsageAmount(order, maximumInPrimaryUnit, inputUnit) || 0;
   const configuredUsage = normalizeConfiguredDailyUsage(order.dailyUsage, order.unit, order.quantity);
   const suggestedInPrimaryUnit = mode === 'consume' && configuredUsage > 0
     ? Math.min(configuredUsage, maximumInPrimaryUnit)
     : Math.min(1, maximumInPrimaryUnit);
-  const suggested = inputUnit === order.unit || !hasSecondaryUnit
+  const suggested = inputUnit === order.unit || !hasAlternativeUnits
     ? suggestedInPrimaryUnit
-    : convertInventoryToUsageAmount(order, suggestedInPrimaryUnit, order.packageUnit as string) || 0;
+    : convertInventoryToUsageAmount(order, suggestedInPrimaryUnit, inputUnit) || 0;
   const [amount, setAmount] = useState(String(suggested));
   const parsedAmount = Number(amount);
-  const parsedInPrimaryUnit = inputUnit === order.unit || !hasSecondaryUnit
+  const parsedInPrimaryUnit = inputUnit === order.unit || !hasAlternativeUnits
     ? parsedAmount
     : convertUsageToInventoryAmount(order, parsedAmount, inputUnit) || 0;
   const valid = Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedInPrimaryUnit > 0 && parsedInPrimaryUnit <= maximumInPrimaryUnit;
@@ -821,19 +843,22 @@ function InventoryAdjustmentDialog({ order, mode, onClose, onConfirm }: {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <Label>本次{verb}数量</Label>
-              {hasSecondaryUnit && (
+              {hasAlternativeUnits && (
                 <Select value={inputUnit} onValueChange={nextUnit => { setInputUnit(nextUnit); setAmount(''); }}>
                   <SelectTrigger className="h-8 w-[120px]" aria-label="选择库存操作单位"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={order.unit}>{order.unit}（库存）</SelectItem>
-                    <SelectItem value={order.packageUnit as string}>{order.packageUnit}（每{order.unit}{order.packageSize}{order.packageUnit}）</SelectItem>
+                    {operationUnits.map(unit => (
+                      <SelectItem key={unit} value={unit}>
+                        {unit}{unit === order.unit ? '（库存）' : ''}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
             </div>
             <Input type="number" min="0" max={maximum} step="any" value={amount} onChange={event => setAmount(event.target.value)} autoFocus />
             {!valid && amount !== '' && <p className="text-xs text-destructive">数量必须大于 0，且不能超过{mode === 'consume' ? '当前库存' : '已领用数量'}。</p>}
-            {hasSecondaryUnit && <p className="text-xs text-muted-foreground">当前可用约 {maximum}{inputUnit}；确认后会换算成库存单位保存。</p>}
+            {hasAlternativeUnits && <p className="text-xs text-muted-foreground">{packageConversionLabel(order)}。当前可用约 {maximum}{inputUnit}；确认后会换算成库存单位保存。</p>}
           </div>
           <p className="text-xs text-muted-foreground">确认后剩余 {valid ? afterRemaining : remaining}{order.unit}，补货提醒会自动重算。</p>
           <div className="flex justify-end gap-2">
@@ -911,6 +936,21 @@ function normalizeHistorySearch(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s\-_/·.,，。()（）]+/g, '');
 }
 
+function recentOrderValues(orders: Order[], select: (order: Order) => string | undefined): string[] {
+  return [...orders]
+    .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate))
+    .map(order => select(order)?.trim() || '')
+    .filter(Boolean);
+}
+
+function packageFieldsValid(packageCount: string, packageCountUnit: string, packageSize: string, packageUnit: string): boolean {
+  const innerPackageValid = (!packageCount && !packageCountUnit.trim())
+    || (Number.isFinite(Number(packageCount)) && Number(packageCount) > 0 && Boolean(packageCountUnit.trim()));
+  const smallestUnitValid = (!packageSize && !packageUnit.trim())
+    || (Number.isFinite(Number(packageSize)) && Number(packageSize) > 0 && Boolean(packageUnit.trim()));
+  return innerPackageValid && smallestUnitValid;
+}
+
 function HistoryItemAutocomplete({ value, orders, onChange, onSelect, placeholder }: {
   value: string;
   orders: Order[];
@@ -934,7 +974,7 @@ function HistoryItemAutocomplete({ value, orders, onChange, onSelect, placeholde
   }, [orders]);
   const suggestions = useMemo(() => {
     const query = normalizeHistorySearch(value);
-    if (!query) return [];
+    if (!query) return templates.slice(0, 8);
     return templates.filter(order => normalizeHistorySearch([
       order.brand,
       order.itemName,
@@ -972,9 +1012,9 @@ function HistoryItemAutocomplete({ value, orders, onChange, onSelect, placeholde
         value={value}
         onChange={event => {
           onChange(event.target.value);
-          setOpen(Boolean(event.target.value.trim()));
+          setOpen(true);
         }}
-        onFocus={() => setOpen(Boolean(value.trim()))}
+        onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
@@ -1011,6 +1051,150 @@ function HistoryItemAutocomplete({ value, orders, onChange, onSelect, placeholde
                   {[order.itemGroup, order.unit, order.purchaseDate].filter(Boolean).join(' · ')}
                 </span>
               </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryTextAutocomplete({ value, values, onChange, placeholder }: {
+  value: string;
+  values: string[];
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const listId = React.useId();
+  const templates = useMemo(() => {
+    const seen = new Set<string>();
+    return values.filter(item => {
+      const normalized = normalizeHistorySearch(item);
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+  }, [values]);
+  const suggestions = useMemo(() => {
+    const query = normalizeHistorySearch(value);
+    if (!query) return templates.slice(0, 8);
+    return templates
+      .filter(item => normalizeHistorySearch(item).includes(query))
+      .slice(0, 8);
+  }, [templates, value]);
+
+  useEffect(() => setActiveIndex(0), [value]);
+
+  const choose = (suggestion: string) => {
+    onChange(suggestion);
+    setOpen(false);
+  };
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open || suggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex(current => (current + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex(current => (current - 1 + suggestions.length) % suggestions.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      choose(suggestions[activeIndex]);
+    } else if (event.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        onChange={event => {
+          onChange(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open && suggestions.length > 0}
+        aria-controls={listId}
+        aria-activedescendant={open && suggestions.length > 0 ? `${listId}-${activeIndex}` : undefined}
+      />
+      {open && suggestions.length > 0 && (
+        <div id={listId} role="listbox" className="absolute inset-x-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+          {suggestions.map((suggestion, index) => (
+            <button
+              key={suggestion}
+              id={`${listId}-${index}`}
+              type="button"
+              role="option"
+              aria-selected={index === activeIndex}
+              onMouseDown={event => event.preventDefault()}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => choose(suggestion)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm',
+                index === activeIndex && 'bg-accent text-accent-foreground'
+              )}
+            >
+              <History className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{suggestion}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryTextareaAutocomplete({ value, values, onChange, placeholder }: {
+  value: string;
+  values: string[];
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const templates = useMemo(() => {
+    const seen = new Set<string>();
+    return values.filter(item => {
+      const normalized = normalizeHistorySearch(item);
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+  }, [values]);
+  const suggestions = useMemo(() => {
+    const query = normalizeHistorySearch(value);
+    return (query ? templates.filter(item => normalizeHistorySearch(item).includes(query)) : templates).slice(0, 6);
+  }, [templates, value]);
+
+  return (
+    <div className="relative">
+      <Textarea
+        value={value}
+        onChange={event => { onChange(event.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        placeholder={placeholder}
+        rows={2}
+      />
+      {open && suggestions.length > 0 && (
+        <div className="absolute inset-x-0 top-full z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+          {suggestions.map(suggestion => (
+            <button
+              key={suggestion}
+              type="button"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => { onChange(suggestion); setOpen(false); }}
+              className="flex w-full items-start gap-2 rounded-sm px-2 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+            >
+              <History className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="line-clamp-2">{suggestion}</span>
             </button>
           ))}
         </div>
@@ -1114,10 +1298,13 @@ function ProductImageField({ imageUrls, onChange, onAnalysis }: {
   );
 }
 
-function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, onChange }: {
+function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, benefitsHistory = [], lifeStageHistory = [], feedingGuidanceHistory = [], onChange }: {
   benefits: string;
   suitableLifeStages: string;
   feedingGuidance: string;
+  benefitsHistory?: string[];
+  lifeStageHistory?: string[];
+  feedingGuidanceHistory?: string[];
   onChange: (field: 'productBenefits' | 'suitableLifeStages' | 'feedingGuidance', value: string) => void;
 }) {
   return (
@@ -1128,15 +1315,15 @@ function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, onCh
       </div>
       <div className="space-y-1.5">
         <Label>功效 / 用途</Label>
-        <Textarea value={benefits} onChange={event => onChange('productBenefits', event.target.value)} placeholder="如：完整营养主食、补充水分、日常营养支持" rows={2} />
+        <HistoryTextareaAutocomplete value={benefits} values={benefitsHistory} onChange={value => onChange('productBenefits', value)} placeholder="如：完整营养主食、补充水分、日常营养支持" />
       </div>
       <div className="space-y-1.5">
         <Label>适合的猫咪阶段</Label>
-        <Input value={suitableLifeStages} onChange={event => onChange('suitableLifeStages', event.target.value)} placeholder="如：幼猫、成猫、恢复期（以包装和兽医意见为准）" />
+        <HistoryTextAutocomplete value={suitableLifeStages} values={lifeStageHistory} onChange={value => onChange('suitableLifeStages', value)} placeholder="如：幼猫、成猫、恢复期（以包装和兽医意见为准）" />
       </div>
       <div className="space-y-1.5">
         <Label>喂食 / 使用提示</Label>
-        <Textarea value={feedingGuidance} onChange={event => onChange('feedingGuidance', event.target.value)} placeholder="如：每日建议量、是否需要泡软、用药剂量等" rows={2} />
+        <HistoryTextareaAutocomplete value={feedingGuidance} values={feedingGuidanceHistory} onChange={value => onChange('feedingGuidance', value)} placeholder="如：每日建议量、是否需要泡软、用药剂量等" />
       </div>
     </div>
   );
@@ -1151,7 +1338,7 @@ function openFeedingPlanDraft(order: Order) {
     order.productBenefits ? `功效/用途：${order.productBenefits}` : '',
     order.suitableLifeStages ? `适合阶段：${order.suitableLifeStages}` : '',
     order.feedingGuidance ? `喂食提示：${order.feedingGuidance}` : '',
-    order.packageSize && order.packageUnit ? `包装换算：1${order.unit}=${order.packageSize}${order.packageUnit}` : '',
+    packageConversionLabel(order) ? `包装换算：${packageConversionLabel(order)}` : '',
   ].filter(Boolean).join('\n');
   window.dispatchEvent(new CustomEvent('zhongfu-chat-draft', {
     detail: `请根据以下采购商品资料，帮我编辑当前喂食计划。先结合钟福当前年龄、体重、健康状态和现有计划判断是否适合，再给出需要新增或替换的餐次和用量。不要擅自改变兽医已经给出的药物剂量；不确定的地方先问我。\n\n${details}`,
@@ -1167,6 +1354,8 @@ function applyProductAnalysis<T extends {
   unit: string;
   totalPrice: string;
   supplier: string;
+  packageCount: string;
+  packageCountUnit: string;
   packageSize: string;
   packageUnit: string;
   productBenefits: string;
@@ -1183,6 +1372,8 @@ function applyProductAnalysis<T extends {
     unit: analysis.unit || current.unit,
     totalPrice: analysis.totalPrice !== undefined ? String(analysis.totalPrice) : current.totalPrice,
     supplier: analysis.supplier || current.supplier,
+    packageCount: analysis.packageCount ? String(analysis.packageCount) : current.packageCount,
+    packageCountUnit: analysis.packageCountUnit || current.packageCountUnit,
     packageSize: analysis.packageSize ? String(analysis.packageSize) : current.packageSize,
     packageUnit: analysis.packageUnit || current.packageUnit,
     productBenefits: analysis.productBenefits || current.productBenefits,
@@ -1211,6 +1402,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     productionDate: order.productionDate || '',
     shelfLife: initialShelfLife.value,
     shelfLifeUnit: initialShelfLife.unit,
+    packageCount: order.packageCount ? String(order.packageCount) : '',
+    packageCountUnit: order.packageCountUnit || '',
     packageSize: order.packageSize ? String(order.packageSize) : '',
     packageUnit: order.packageUnit || '',
     imageUrls: order.imageUrls?.length ? order.imageUrls : order.imageUrl ? [order.imageUrl] : [],
@@ -1224,8 +1417,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
   const comparableOrders = orders.filter(item => item.id !== order.id);
   const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, comparableOrders);
-  const packageValid = (!form.packageSize && !form.packageUnit.trim())
-    || (Number.isFinite(Number(form.packageSize)) && Number(form.packageSize) > 0 && Boolean(form.packageUnit.trim()));
+  const packageValid = packageFieldsValid(form.packageCount, form.packageCountUnit, form.packageSize, form.packageUnit);
   const valid = Boolean(
     form.itemName.trim()
     && form.unit.trim()
@@ -1253,6 +1445,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       productionDate: form.productionDate || undefined,
       shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
+      packageCount: form.packageCount ? Number(form.packageCount) : undefined,
+      packageCountUnit: form.packageCount ? form.packageCountUnit.trim() || undefined : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
       imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
@@ -1279,7 +1473,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>品牌（可选）</Label>
-              <Input value={form.brand} onChange={event => setForm(current => ({ ...current, brand: event.target.value }))} placeholder="如：麦德氏" />
+              <HistoryTextAutocomplete value={form.brand} values={recentOrderValues(orders, item => item.brand)} onChange={brand => setForm(current => ({ ...current, brand }))} placeholder="如：麦德氏" />
             </div>
             <div className="space-y-1.5">
               <Label>物资名称</Label>
@@ -1299,6 +1493,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
                     supplier: template.supplier,
                     shelfLife: shelfLife.value,
                     shelfLifeUnit: shelfLife.unit,
+                    packageCount: template.packageCount ? String(template.packageCount) : '',
+                    packageCountUnit: template.packageCountUnit || '',
                     packageSize: template.packageSize ? String(template.packageSize) : '',
                     packageUnit: template.packageUnit || '',
                     imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
@@ -1313,12 +1509,15 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           </div>
           <div className="space-y-1.5">
             <Label>物资系列 / 大标题（可选）</Label>
-            <Input value={form.itemGroup} onChange={event => setForm(current => ({ ...current, itemGroup: event.target.value }))} placeholder="如：原切冻干" />
+            <HistoryTextAutocomplete value={form.itemGroup} values={recentOrderValues(orders, item => item.itemGroup)} onChange={itemGroup => setForm(current => ({ ...current, itemGroup }))} placeholder="输入可联想历史系列，如：原切冻干" />
           </div>
           <ProductInfoFields
             benefits={form.productBenefits}
             suitableLifeStages={form.suitableLifeStages}
             feedingGuidance={form.feedingGuidance}
+            benefitsHistory={recentOrderValues(orders, item => item.productBenefits)}
+            lifeStageHistory={recentOrderValues(orders, item => item.suitableLifeStages)}
+            feedingGuidanceHistory={recentOrderValues(orders, item => item.feedingGuidance)}
             onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
           />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1348,7 +1547,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
             </div>
             <div className="space-y-1.5">
               <Label>单位</Label>
-              <Input value={form.unit} onChange={event => setForm(current => ({ ...current, unit: event.target.value }))} />
+              <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => item.unit)} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="盒/包/袋/kg" />
             </div>
             <div className="space-y-1.5">
               <Label>本次总价(¥)</Label>
@@ -1359,10 +1558,15 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
             <Label>包装换算（可选）</Label>
             <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
               <span className="text-sm text-muted-foreground">每{form.unit.trim() || '单位'}含</span>
-              <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：20" />
-              <Input value={form.packageUnit} onChange={event => setForm(current => ({ ...current, packageUnit: event.target.value }))} placeholder="片/粒/g" />
+              <Input type="number" min="0" step="any" value={form.packageCount} onChange={event => setForm(current => ({ ...current, packageCount: event.target.value }))} placeholder="如：6" />
+              <HistoryTextAutocomplete value={form.packageCountUnit} values={recentOrderValues(orders, item => item.packageCountUnit)} onChange={packageCountUnit => setForm(current => ({ ...current, packageCountUnit }))} placeholder="包/袋/板" />
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">例：库存按盒记录，每盒20片；完成0.5片用药会扣0.025盒。</p>
+            <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+              <span className="text-sm text-muted-foreground">每{form.packageCountUnit.trim() || form.unit.trim() || '单位'}含</span>
+              <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：20" />
+              <HistoryTextAutocomplete value={form.packageUnit} values={recentOrderValues(orders, item => item.packageUnit)} onChange={packageUnit => setForm(current => ({ ...current, packageUnit }))} placeholder="片/粒/g" />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">例：数量1、单位盒；每盒6包；每包60g。也可只填第二行表示每盒20片。</p>
           </div>
           {unitPrice > 0 && (
             <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
@@ -1373,7 +1577,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>购买渠道 / 商家（可选）</Label>
-              <Input value={form.supplier} onChange={event => setForm(current => ({ ...current, supplier: event.target.value }))} placeholder="如：抖音直播间、宠物店" />
+              <HistoryTextAutocomplete value={form.supplier} values={recentOrderValues(orders, item => item.supplier)} onChange={supplier => setForm(current => ({ ...current, supplier }))} placeholder="如：抖音直播间、宠物店" />
             </div>
             <div className="space-y-1.5">
               <Label>采购日期</Label>
@@ -1408,13 +1612,14 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
   const [form, setForm] = useState({
     brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
-    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '',
+    productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit,
+    packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '',
     imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
-    { id: 'bundle_2', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
+    { id: 'bundle_1', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
   ]);
   const applyHistoryTemplate = (template: Order) => {
     const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
@@ -1431,6 +1636,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       productionDate: '',
       shelfLife: shelfLife.value,
       shelfLifeUnit: shelfLife.unit,
+      packageCount: template.packageCount ? String(template.packageCount) : '',
+      packageCountUnit: template.packageCountUnit || '',
       packageSize: template.packageSize ? String(template.packageSize) : '',
       packageUnit: template.packageUnit || '',
       imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
@@ -1456,8 +1663,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       && itemQuantity > 0
       && Number.isFinite(allocatedPrice)
       && allocatedPrice >= 0
-      && ((!item.packageSize && !item.packageUnit.trim())
-        || (Number.isFinite(Number(item.packageSize)) && Number(item.packageSize) > 0 && Boolean(item.packageUnit.trim())))
+      && packageFieldsValid(item.packageCount, item.packageCountUnit, item.packageSize, item.packageUnit)
     );
   });
   const bundleValid = Boolean(
@@ -1492,6 +1698,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           productionDate: item.productionDate || undefined,
           shelfLife: shelfLifeInDays(item.shelfLife, item.shelfLifeUnit),
           shelfLifeUnit: item.shelfLife ? item.shelfLifeUnit : undefined,
+          packageCount: item.packageCount ? Number(item.packageCount) : undefined,
+          packageCountUnit: item.packageCount ? item.packageCountUnit.trim() || undefined : undefined,
           packageSize: item.packageSize ? Number(item.packageSize) : undefined,
           packageUnit: item.packageSize ? item.packageUnit.trim() || undefined : undefined,
         });
@@ -1521,8 +1729,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       onClose();
       return;
     }
-    const packageValid = (!form.packageSize && !form.packageUnit.trim())
-      || (Number.isFinite(Number(form.packageSize)) && Number(form.packageSize) > 0 && Boolean(form.packageUnit.trim()));
+    const packageValid = packageFieldsValid(form.packageCount, form.packageCountUnit, form.packageSize, form.packageUnit);
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
     onAdd({
       catId: 'shared',
@@ -1541,6 +1748,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       productionDate: form.productionDate || undefined,
       shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
+      packageCount: form.packageCount ? Number(form.packageCount) : undefined,
+      packageCountUnit: form.packageCount ? form.packageCountUnit.trim() || undefined : undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
       imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
@@ -1581,7 +1790,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
               </div>
               <div className="space-y-1.5">
                 <Label>商家/直播间</Label>
-                <Input value={form.supplier} onChange={event => setForm(current => ({ ...current, supplier: event.target.value }))} placeholder="如：抖音某某直播间" />
+                <HistoryTextAutocomplete value={form.supplier} values={recentOrderValues(orders, item => item.supplier)} onChange={supplier => setForm(current => ({ ...current, supplier }))} placeholder="如：抖音某某直播间" />
               </div>
               <div className="space-y-1.5">
                 <Label>整单实付(¥)</Label>
@@ -1600,7 +1809,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                     )}
                   </div>
                   <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <Input value={item.brand} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, brand: event.target.value } : entry))} placeholder="品牌，如：麦德氏" />
+                    <HistoryTextAutocomplete value={item.brand} values={recentOrderValues(orders, order => order.brand)} onChange={brand => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, brand } : entry))} placeholder="品牌，如：麦德氏" />
                     <HistoryItemAutocomplete
                       value={item.itemName}
                       orders={orders}
@@ -1617,13 +1826,15 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                           unit: template.unit,
                           shelfLife: shelfLife.value,
                           shelfLifeUnit: shelfLife.unit,
+                          packageCount: template.packageCount ? String(template.packageCount) : '',
+                          packageCountUnit: template.packageCountUnit || '',
                           packageSize: template.packageSize ? String(template.packageSize) : '',
                           packageUnit: template.packageUnit || '',
                         } : entry));
                       }}
                       placeholder="物品名称，输入可联想"
                     />
-                    <Input value={item.itemGroup} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemGroup: event.target.value } : entry))} placeholder="系列/大标题，如：原切冻干" />
+                    <HistoryTextAutocomplete value={item.itemGroup} values={recentOrderValues(orders, order => order.itemGroup)} onChange={itemGroup => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemGroup } : entry))} placeholder="系列/大标题，如：原切冻干" />
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[130px_80px_80px_minmax(0,1fr)]">
                     <Select value={item.category} onValueChange={category => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, category } : entry))}>
@@ -1631,10 +1842,10 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                       <SelectContent><InventoryCategoryOptions /></SelectContent>
                     </Select>
                     <Input type="number" min="0" step="any" value={item.quantity} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, quantity: event.target.value } : entry))} placeholder="数量" />
-                    <Input value={item.unit} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, unit: event.target.value } : entry))} placeholder="单位" />
+                    <HistoryTextAutocomplete value={item.unit} values={recentOrderValues(orders, order => order.unit)} onChange={unit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, unit } : entry))} placeholder="单位" />
                     <Input type="number" min="0" step="0.01" value={item.allocatedPrice} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, allocatedPrice: event.target.value } : entry))} placeholder="分摊金额(选填)" />
                   </div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.15fr)_minmax(168px,1.35fr)_minmax(82px,0.75fr)_minmax(78px,0.75fr)]">
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">生产日期（选填）</Label>
                       <Input type="date" value={item.productionDate} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, productionDate: event.target.value } : entry))} aria-label={`明细 ${index + 1} 生产日期`} />
@@ -1647,18 +1858,16 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                       onValueChange={shelfLife => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLife } : entry))}
                       onUnitChange={shelfLifeUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, shelfLifeUnit } : entry))}
                     />
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">每{item.unit || '单位'}内含（选填）</Label>
-                      <Input type="number" min="0" step="any" value={item.packageSize} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageSize: event.target.value } : entry))} placeholder="如：20" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">内含单位</Label>
-                      <Input value={item.packageUnit} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageUnit: event.target.value } : entry))} placeholder="片/粒/g" />
-                    </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">每{item.unit || '单位'}含</Label><Input type="number" min="0" step="any" value={item.packageCount} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageCount: event.target.value } : entry))} placeholder="如：6" /></div>
+                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">中间单位</Label><HistoryTextAutocomplete value={item.packageCountUnit} values={recentOrderValues(orders, order => order.packageCountUnit)} onChange={packageCountUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageCountUnit } : entry))} placeholder="包/袋/板" /></div>
+                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">每{item.packageCountUnit || item.unit || '单位'}含</Label><Input type="number" min="0" step="any" value={item.packageSize} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageSize: event.target.value } : entry))} placeholder="如：60" /></div>
+                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">最小单位</Label><HistoryTextAutocomplete value={item.packageUnit} values={recentOrderValues(orders, order => order.packageUnit)} onChange={packageUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageUnit } : entry))} placeholder="片/粒/g" /></div>
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, brand: '', itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageSize: '', packageUnit: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, brand: '', itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -1680,7 +1889,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>品牌（可选）</Label>
-            <Input value={form.brand} onChange={e => setForm(p => ({ ...p, brand: e.target.value }))} placeholder="如：麦德氏" />
+            <HistoryTextAutocomplete value={form.brand} values={recentOrderValues(orders, item => item.brand)} onChange={brand => setForm(current => ({ ...current, brand }))} placeholder="如：麦德氏" />
           </div>
           <div className="space-y-1.5">
             <Label>物资名称</Label>
@@ -1695,7 +1904,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         </div>
         <div className="space-y-1.5">
           <Label>物资系列 / 大标题（可选）</Label>
-          <Input value={form.itemGroup} onChange={e => setForm(p => ({ ...p, itemGroup: e.target.value }))} placeholder="如：原切冻干" />
+          <HistoryTextAutocomplete value={form.itemGroup} values={recentOrderValues(orders, item => item.itemGroup)} onChange={itemGroup => setForm(current => ({ ...current, itemGroup }))} placeholder="输入可联想历史系列，如：原切冻干" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
@@ -1707,7 +1916,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           </div>
           <div className="space-y-1.5">
             <Label>购买渠道 / 商家（可选）</Label>
-            <Input value={form.supplier} onChange={e => setForm(p => ({ ...p, supplier: e.target.value }))} placeholder="如：抖音直播间、宠物店" />
+            <HistoryTextAutocomplete value={form.supplier} values={recentOrderValues(orders, item => item.supplier)} onChange={supplier => setForm(current => ({ ...current, supplier }))} placeholder="如：抖音直播间、宠物店" />
           </div>
         </div>
         <div className="space-y-1.5">
@@ -1721,7 +1930,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           </div>
           <div className="space-y-1.5">
             <Label>单位</Label>
-            <Input value={form.unit} onChange={e => setForm(p => ({ ...p, unit: e.target.value }))} placeholder="kg/包/袋" />
+            <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => item.unit)} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="kg/包/袋" />
           </div>
           <div className="space-y-1.5">
             <Label>本次总价(¥)</Label>
@@ -1732,10 +1941,15 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           <Label>包装换算（可选）</Label>
           <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
             <span className="text-sm text-muted-foreground">每{form.unit.trim() || '单位'}含</span>
-            <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：20" />
-            <Input value={form.packageUnit} onChange={event => setForm(current => ({ ...current, packageUnit: event.target.value }))} placeholder="片/粒/g" />
+            <Input type="number" min="0" step="any" value={form.packageCount} onChange={event => setForm(current => ({ ...current, packageCount: event.target.value }))} placeholder="如：6" />
+            <HistoryTextAutocomplete value={form.packageCountUnit} values={recentOrderValues(orders, item => item.packageCountUnit)} onChange={packageCountUnit => setForm(current => ({ ...current, packageCountUnit }))} placeholder="包/袋/板" />
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">药品示例：数量1、单位盒、每盒含20片。</p>
+          <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+            <span className="text-sm text-muted-foreground">每{form.packageCountUnit.trim() || form.unit.trim() || '单位'}含</span>
+            <Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="如：20" />
+            <HistoryTextAutocomplete value={form.packageUnit} values={recentOrderValues(orders, item => item.packageUnit)} onChange={packageUnit => setForm(current => ({ ...current, packageUnit }))} placeholder="片/粒/g" />
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">整盒食品示例：数量1、单位盒；每盒6包；每包60g。药品可留空第一行，只填每盒20片。</p>
         </div>
         {unitPrice > 0 && (
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
@@ -1769,6 +1983,9 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           benefits={form.productBenefits}
           suitableLifeStages={form.suitableLifeStages}
           feedingGuidance={form.feedingGuidance}
+          benefitsHistory={recentOrderValues(orders, item => item.productBenefits)}
+          lifeStageHistory={recentOrderValues(orders, item => item.suitableLifeStages)}
+          feedingGuidanceHistory={recentOrderValues(orders, item => item.feedingGuidance)}
           onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
         />
         <div className="rounded-lg bg-primary/5 px-3 py-2.5">

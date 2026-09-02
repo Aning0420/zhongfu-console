@@ -7,6 +7,8 @@ export interface ProductImageAnalysis {
   category?: string;
   quantity?: number;
   unit?: string;
+  packageCount?: number;
+  packageCountUnit?: string;
   packageSize?: number;
   packageUnit?: string;
   totalPrice?: number;
@@ -153,6 +155,8 @@ export async function analyzeProductImage(image: string): Promise<ProductImageAn
     category: data.category ? normalizeInventoryCategory(data.category) : undefined,
     quantity: numberValue(data.quantity),
     unit: stringValue(data.unit),
+    packageCount: numberValue(data.package_count),
+    packageCountUnit: stringValue(data.package_count_unit),
     packageSize: numberValue(data.package_size),
     packageUnit: stringValue(data.package_unit),
     totalPrice: numberValue(data.total_price),
@@ -180,6 +184,8 @@ export async function analyzeProductImages(images: string[]): Promise<ProductIma
     category: combined.category || current.category,
     quantity: combined.quantity || current.quantity,
     unit: combined.unit || current.unit,
+    packageCount: combined.packageCount || current.packageCount,
+    packageCountUnit: combined.packageCountUnit || current.packageCountUnit,
     packageSize: combined.packageSize || current.packageSize,
     packageUnit: combined.packageUnit || current.packageUnit,
     totalPrice: combined.totalPrice ?? current.totalPrice,

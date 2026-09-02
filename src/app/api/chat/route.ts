@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `你是"钟福供养办事处"的猫咪管理助手，负�
 
 ### 采购录入
 ---SYNC_DATA_START---
-{"type":"procurement","data":{"brand":"品牌或空字符串","item_name":"具体物品名或口味","item_group":"系列/大标题或空字符串","category":"物品细分类","quantity":数量,"unit":"单位","package_size":每个库存单位内含数量或null,"package_unit":"片/粒/g等或空字符串","total_price":本次实付总价,"supplier":"供应商","product_benefits":"包装宣称或常见用途","suitable_life_stages":"适合的猫咪阶段","feeding_guidance":"按包装和兽医建议整理的喂食提示"}}
+{"type":"procurement","data":{"brand":"品牌或空字符串","item_name":"具体物品名或口味","item_group":"系列/大标题或空字符串","category":"物品细分类","quantity":数量,"unit":"库存单位","package_count":每个库存单位内含的中间包装数量或null,"package_count_unit":"包/袋/板等中间单位或空字符串","package_size":每个中间包装内含的最小单位数量或null,"package_unit":"片/粒/g等最小单位或空字符串","total_price":本次实付总价,"supplier":"供应商","product_benefits":"包装宣称或常见用途","suitable_life_stages":"适合的猫咪阶段","feeding_guidance":"按包装和兽医建议整理的喂食提示"}}
 ---SYNC_DATA_END---
 
 ### 支出录入
@@ -65,6 +65,7 @@ const SYSTEM_PROMPT = `你是"钟福供养办事处"的猫咪管理助手，负�
 
 ## 规则
 - 采购中的 total_price 是整次购买的实付总额，不是单价；例如“1.8kg共109元”应提取 quantity=1.8、unit=kg、total_price=109
+- 多层包装要完整提取；例如“1盒，盒内6包，每包60g”应提取 quantity=1、unit=盒、package_count=6、package_count_unit=包、package_size=60、package_unit=g
 - 药品优先按实际消耗的最小单位入库；例如“1盒速诺，每盒20片”优先提取 quantity=20、unit=片，package_size=null、package_unit=""，这样每次0.5片可以直接扣减；只有用户明确要求按盒管理时才使用包装换算
 - 采购会由应用自动同步支出，不要再额外生成一条支出数据
 - 如果信息不完整（如没提总价），用合理默认值（总价设为0）

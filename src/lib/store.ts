@@ -25,7 +25,10 @@ export interface Order {
   shelfLife?: number; // days
   shelfLifeUnit?: 'day' | 'month' | 'year';
   dailyUsage?: number; // average daily consumption
-  /** Optional package conversion, for example 20 tablets per box. */
+  /** Optional inner package layer, for example 6 bags per box. */
+  packageCount?: number;
+  packageCountUnit?: string;
+  /** Optional smallest-unit conversion, for example 60g per bag or 20 tablets per box. */
   packageSize?: number;
   packageUnit?: string;
   /** Compressed product/package photos. The first item is the cover image. */
@@ -178,16 +181,33 @@ export function convertInventoryAmount(value: number, fromUnit: string, toUnit: 
 export function convertUsageToInventoryAmount(order: Order, value: number, usageUnit: string): number | null {
   const direct = convertInventoryAmount(value, usageUnit, order.unit);
   if (direct !== null) return direct;
+  const hasInnerPackage = Number.isFinite(order.packageCount)
+    && (order.packageCount ?? 0) > 0
+    && Boolean(order.packageCountUnit?.trim());
+  if (hasInnerPackage) {
+    const inInnerPackages = convertInventoryAmount(value, usageUnit, order.packageCountUnit as string);
+    if (inInnerPackages !== null) return inInnerPackages / (order.packageCount as number);
+  }
   if (!Number.isFinite(order.packageSize) || (order.packageSize ?? 0) <= 0 || !order.packageUnit?.trim()) return null;
   const inPackageUnit = convertInventoryAmount(value, usageUnit, order.packageUnit);
-  return inPackageUnit === null ? null : inPackageUnit / (order.packageSize as number);
+  if (inPackageUnit === null) return null;
+  const smallestUnitsPerInventoryUnit = (order.packageSize as number) * (hasInnerPackage ? order.packageCount as number : 1);
+  return inPackageUnit / smallestUnitsPerInventoryUnit;
 }
 
 export function convertInventoryToUsageAmount(order: Order, value: number, usageUnit: string): number | null {
   const direct = convertInventoryAmount(value, order.unit, usageUnit);
   if (direct !== null) return direct;
+  const hasInnerPackage = Number.isFinite(order.packageCount)
+    && (order.packageCount ?? 0) > 0
+    && Boolean(order.packageCountUnit?.trim());
+  if (hasInnerPackage) {
+    const innerPackageAmount = value * (order.packageCount as number);
+    const convertedInnerPackages = convertInventoryAmount(innerPackageAmount, order.packageCountUnit as string, usageUnit);
+    if (convertedInnerPackages !== null) return convertedInnerPackages;
+  }
   if (!Number.isFinite(order.packageSize) || (order.packageSize ?? 0) <= 0 || !order.packageUnit?.trim()) return null;
-  const packageAmount = value * (order.packageSize as number);
+  const packageAmount = value * (order.packageSize as number) * (hasInnerPackage ? order.packageCount as number : 1);
   return convertInventoryAmount(packageAmount, order.packageUnit, usageUnit);
 }
 

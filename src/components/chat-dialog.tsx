@@ -261,6 +261,8 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
           unit: String(d.unit || '个'),
           unitPrice: totalPrice / quantity,
           totalPrice,
+          packageCount: Number(d.package_count) > 0 ? Number(d.package_count) : undefined,
+          packageCountUnit: Number(d.package_count) > 0 ? String(d.package_count_unit || '').trim() || undefined : undefined,
           packageSize: Number(d.package_size) > 0 ? Number(d.package_size) : undefined,
           packageUnit: Number(d.package_size) > 0 ? String(d.package_unit || '').trim() || undefined : undefined,
           productBenefits: String(d.product_benefits || '').trim() || undefined,

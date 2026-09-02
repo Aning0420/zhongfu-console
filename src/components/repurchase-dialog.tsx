@@ -51,6 +51,8 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
       supplier: form.supplier.trim() || order.supplier,
       shelfLife: order.shelfLife,
       shelfLifeUnit: order.shelfLifeUnit,
+      packageCount: order.packageCount,
+      packageCountUnit: order.packageCountUnit,
       packageSize: order.packageSize,
       packageUnit: order.packageUnit,
       imageUrls: order.imageUrls,
