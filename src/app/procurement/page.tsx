@@ -76,6 +76,10 @@ function formatShelfLife(order: Order): string {
   return display.value ? `${display.value}${label}` : '-';
 }
 
+function productDisplayName(order: Order): string {
+  return [order.brand, order.itemName].filter(Boolean).join(' ');
+}
+
 function SortableHeader({ field, label, activeField, direction, onSort, className }: {
   field: SortField;
   label: string;
@@ -245,12 +249,12 @@ export default function ProcurementPage() {
         if (statusFilter === 'in-progress' && !['pending', 'shipped'].includes(o.status)) return false;
         if (!['all', 'low-stock', 'expiring', 'expired', 'in-progress'].includes(statusFilter) && o.status !== statusFilter) return false;
         if (categoryFilter !== 'all' && o.category !== categoryFilter) return false;
-        if (search && !o.itemName.includes(search) && !(o.itemGroup || '').includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
+        if (search && !(o.brand || '').includes(search) && !o.itemName.includes(search) && !(o.itemGroup || '').includes(search) && !o.category.includes(search) && !o.supplier.includes(search)) return false;
         return true;
       })
       .sort((a, b) => {
         let comparison = 0;
-        if (sortField === 'name') comparison = chineseCollator.compare(`${a.itemGroup || ''}${a.itemName}`, `${b.itemGroup || ''}${b.itemName}`);
+        if (sortField === 'name') comparison = chineseCollator.compare(`${a.brand || ''}${a.itemGroup || ''}${a.itemName}`, `${b.brand || ''}${b.itemGroup || ''}${b.itemName}`);
         if (sortField === 'category') comparison = chineseCollator.compare(a.category, b.category);
         if (sortField === 'purchaseDate') comparison = a.purchaseDate.localeCompare(b.purchaseDate);
         if (sortField === 'status') comparison = statusSortOrder[a.status] - statusSortOrder[b.status];
@@ -363,7 +367,7 @@ export default function ProcurementPage() {
               <div key={order.id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-[#E88888]/5">
                 <div className="flex items-center gap-2">
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{order.itemName}</span>
+                  <span className="text-sm font-medium text-foreground">{productDisplayName(order)}</span>
                   <span className="text-xs text-muted-foreground">{inventoryRemaining(order)}{order.unit} 剩余</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -391,7 +395,7 @@ export default function ProcurementPage() {
               <div key={order.id} className="flex flex-col gap-2 py-2 px-3 rounded-lg bg-accent/5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{order.itemName}</span>
+                  <span className="text-sm font-medium text-foreground">{productDisplayName(order)}</span>
                   <span className="text-xs text-muted-foreground">剩余 {inventoryRemaining(order)}{order.unit}</span>
                   <span className="text-xs text-muted-foreground">· 日均消耗 {formatInventoryDailyUsage(dailyUsage, order.unit)}</span>
                 </div>
@@ -440,7 +444,7 @@ export default function ProcurementPage() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-medium text-sm text-foreground">{order.itemName}</span>
+                  <span className="font-medium text-sm text-foreground">{productDisplayName(order)}</span>
                   {preference === 'loved' ? (
                     <Badge className="bg-primary/15 text-primary text-xs">推荐回购</Badge>
                   ) : preference === 'disliked' ? (
@@ -476,7 +480,7 @@ export default function ProcurementPage() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="搜索系列、物资名称、分类、供应商..."
+            placeholder="搜索品牌、系列、物资名称、分类、供应商..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-9 bg-card"
@@ -589,8 +593,9 @@ export default function ProcurementPage() {
                 return (
                   <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
                     <td className="sticky left-0 z-10 w-[172px] min-w-[172px] max-w-[172px] bg-card px-4 py-3 shadow-[7px_0_9px_-9px_rgba(56,45,49,0.65)] transition-colors group-hover:bg-muted">
+                      {order.brand && <div className="mb-0.5 text-xs font-semibold text-foreground" title={order.brand}>{order.brand}</div>}
                       {showGroupHeading && <div className="mb-1 text-xs font-semibold text-primary" title={order.itemGroup}>{order.itemGroup}</div>}
-                      <div className={cn('flex items-center gap-2', order.itemGroup && 'pl-2')}>
+                      <div className={cn('flex items-center gap-2', (order.brand || order.itemGroup) && 'pl-2')}>
                         {(order.imageUrls?.[0] || order.imageUrl) ? (
                           <Image src={order.imageUrls?.[0] || order.imageUrl || ''} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
                         ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
@@ -902,6 +907,118 @@ function ShelfLifeField({ value, unit, onValueChange, onUnitChange, label = '保
   );
 }
 
+function normalizeHistorySearch(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s\-_/·.,，。()（）]+/g, '');
+}
+
+function HistoryItemAutocomplete({ value, orders, onChange, onSelect, placeholder }: {
+  value: string;
+  orders: Order[];
+  onChange: (value: string) => void;
+  onSelect: (order: Order) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const listId = React.useId();
+  const templates = useMemo(() => {
+    const seen = new Set<string>();
+    return [...orders]
+      .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate))
+      .filter(order => {
+        const key = normalizeHistorySearch(`${order.brand || ''}\u0000${order.itemName}\u0000${order.unit}`);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [orders]);
+  const suggestions = useMemo(() => {
+    const query = normalizeHistorySearch(value);
+    if (!query) return [];
+    return templates.filter(order => normalizeHistorySearch([
+      order.brand,
+      order.itemName,
+      order.itemGroup,
+      order.category,
+      order.unit,
+    ].filter(Boolean).join(' ')).includes(query)).slice(0, 8);
+  }, [templates, value]);
+
+  useEffect(() => setActiveIndex(0), [value]);
+
+  const choose = (order: Order) => {
+    onSelect(order);
+    setOpen(false);
+  };
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open || suggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex(current => (current + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex(current => (current - 1 + suggestions.length) % suggestions.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      choose(suggestions[activeIndex]);
+    } else if (event.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        onChange={event => {
+          onChange(event.target.value);
+          setOpen(Boolean(event.target.value.trim()));
+        }}
+        onFocus={() => setOpen(Boolean(value.trim()))}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open && suggestions.length > 0}
+        aria-controls={listId}
+        aria-activedescendant={open && suggestions.length > 0 ? `${listId}-${suggestions[activeIndex]?.id}` : undefined}
+      />
+      {open && suggestions.length > 0 && (
+        <div id={listId} role="listbox" className="absolute inset-x-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+          {suggestions.map((order, index) => (
+            <button
+              key={order.id}
+              id={`${listId}-${order.id}`}
+              type="button"
+              role="option"
+              aria-selected={index === activeIndex}
+              onMouseDown={event => event.preventDefault()}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => choose(order)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm',
+                index === activeIndex && 'bg-accent text-accent-foreground'
+              )}
+            >
+              <History className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  {order.brand && <span className="shrink-0 font-semibold">{order.brand}</span>}
+                  <span className="truncate">{order.itemName}</span>
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {[order.itemGroup, order.unit, order.purchaseDate].filter(Boolean).join(' · ')}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MAX_PRODUCT_IMAGES = 4;
 
 function ProductImageField({ imageUrls, onChange, onAnalysis }: {
@@ -1027,6 +1144,7 @@ function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, onCh
 
 function openFeedingPlanDraft(order: Order) {
   const details = [
+    order.brand ? `品牌：${order.brand}` : '',
     `商品：${order.itemName}`,
     order.itemGroup ? `系列：${order.itemGroup}` : '',
     order.category ? `分类：${order.category}` : '',
@@ -1041,6 +1159,7 @@ function openFeedingPlanDraft(order: Order) {
 }
 
 function applyProductAnalysis<T extends {
+  brand: string;
   itemName: string;
   itemGroup: string;
   category: string;
@@ -1056,6 +1175,7 @@ function applyProductAnalysis<T extends {
 }>(current: T, analysis: ProductImageAnalysis): T {
   return {
     ...current,
+    brand: analysis.brand || current.brand,
     itemName: analysis.itemName || current.itemName,
     itemGroup: analysis.itemGroup || current.itemGroup,
     category: analysis.category || current.category,
@@ -1079,6 +1199,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 }) {
   const initialShelfLife = shelfLifeForEditing(order.shelfLife, order.shelfLifeUnit);
   const [form, setForm] = useState({
+    brand: order.brand || '',
     itemName: order.itemName,
     itemGroup: order.itemGroup || '',
     category: order.category,
@@ -1119,6 +1240,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   const handleSave = () => {
     if (!valid) return;
     onSave({
+      brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
@@ -1154,13 +1276,44 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
             onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
             onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
           />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>品牌（可选）</Label>
+              <Input value={form.brand} onChange={event => setForm(current => ({ ...current, brand: event.target.value }))} placeholder="如：麦德氏" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>物资名称</Label>
+              <HistoryItemAutocomplete
+                value={form.itemName}
+                orders={orders.filter(item => item.id !== order.id)}
+                onChange={itemName => setForm(current => ({ ...current, itemName }))}
+                onSelect={template => {
+                  const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
+                  setForm(current => ({
+                    ...current,
+                    brand: template.brand || '',
+                    itemName: template.itemName,
+                    itemGroup: template.itemGroup || '',
+                    category: template.category,
+                    unit: template.unit,
+                    supplier: template.supplier,
+                    shelfLife: shelfLife.value,
+                    shelfLifeUnit: shelfLife.unit,
+                    packageSize: template.packageSize ? String(template.packageSize) : '',
+                    packageUnit: template.packageUnit || '',
+                    imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
+                    productBenefits: template.productBenefits || '',
+                    suitableLifeStages: template.suitableLifeStages || '',
+                    feedingGuidance: template.feedingGuidance || '',
+                  }));
+                }}
+                placeholder="输入品牌或名称联想历史物资"
+              />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <Label>物资系列 / 大标题（可选）</Label>
             <Input value={form.itemGroup} onChange={event => setForm(current => ({ ...current, itemGroup: event.target.value }))} placeholder="如：原切冻干" />
-          </div>
-          <div className="space-y-1.5">
-            <Label>物资名称</Label>
-            <Input value={form.itemName} onChange={event => setForm(current => ({ ...current, itemName: event.target.value }))} />
           </div>
           <ProductInfoFields
             benefits={form.productBenefits}
@@ -1219,8 +1372,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>供应商</Label>
-              <Input value={form.supplier} onChange={event => setForm(current => ({ ...current, supplier: event.target.value }))} />
+              <Label>购买渠道 / 商家（可选）</Label>
+              <Input value={form.supplier} onChange={event => setForm(current => ({ ...current, supplier: event.target.value }))} placeholder="如：抖音直播间、宠物店" />
             </div>
             <div className="space-y-1.5">
               <Label>采购日期</Label>
@@ -1253,36 +1406,21 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
 
 function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [mode, setMode] = useState<'single' | 'bundle'>('single');
-  const [historyTemplateId, setHistoryTemplateId] = useState('');
   const [form, setForm] = useState({
-    itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
+    brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '',
     imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
-    { id: 'bundle_2', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
+    { id: 'bundle_1', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageSize: '', packageUnit: '' },
   ]);
-  const historyTemplates = useMemo(() => {
-    const seen = new Set<string>();
-    return [...orders]
-      .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate))
-      .filter(order => {
-        const key = `${order.itemName.trim().toLocaleLowerCase('zh-CN')}\u0000${order.unit.trim().toLocaleLowerCase('zh-CN')}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  }, [orders]);
-
-  const applyHistoryTemplate = (templateId: string) => {
-    setHistoryTemplateId(templateId);
-    const template = orders.find(order => order.id === templateId);
-    if (!template) return;
+  const applyHistoryTemplate = (template: Order) => {
     const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
     setForm(current => ({
       ...current,
+      brand: template.brand || '',
       itemName: template.itemName,
       itemGroup: template.itemGroup || '',
       category: template.category,
@@ -1339,6 +1477,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
         onAdd({
           catId: 'shared',
+          brand: item.brand.trim() || undefined,
           itemName: item.itemName.trim(),
           itemGroup: item.itemGroup.trim() || undefined,
           category: item.category,
@@ -1387,6 +1526,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
     onAdd({
       catId: 'shared',
+      brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
@@ -1459,9 +1599,31 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                       </Button>
                     )}
                   </div>
-                  <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <Input value={item.brand} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, brand: event.target.value } : entry))} placeholder="品牌，如：麦德氏" />
+                    <HistoryItemAutocomplete
+                      value={item.itemName}
+                      orders={orders}
+                      onChange={itemName => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemName } : entry))}
+                      onSelect={template => {
+                        const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
+                        setBundleItems(current => current.map(entry => entry.id === item.id ? {
+                          ...entry,
+                          brand: template.brand || '',
+                          itemName: template.itemName,
+                          itemGroup: template.itemGroup || '',
+                          category: template.category,
+                          quantity: String(template.quantity),
+                          unit: template.unit,
+                          shelfLife: shelfLife.value,
+                          shelfLifeUnit: shelfLife.unit,
+                          packageSize: template.packageSize ? String(template.packageSize) : '',
+                          packageUnit: template.packageUnit || '',
+                        } : entry));
+                      }}
+                      placeholder="物品名称，输入可联想"
+                    />
                     <Input value={item.itemGroup} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemGroup: event.target.value } : entry))} placeholder="系列/大标题，如：原切冻干" />
-                    <Input value={item.itemName} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemName: event.target.value } : entry))} placeholder="具体名称/口味，如：厚切鸭胸肉" />
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[130px_80px_80px_minmax(0,1fr)]">
                     <Select value={item.category} onValueChange={category => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, category } : entry))}>
@@ -1496,7 +1658,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageSize: '', packageUnit: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, brand: '', itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -1510,37 +1672,30 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           </>
         ) : (
           <>
-        {historyTemplates.length > 0 && (
-          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-            <Label className="mb-1.5 block">从历史记录带入（可选）</Label>
-            <Select value={historyTemplateId} onValueChange={applyHistoryTemplate}>
-              <SelectTrigger className="bg-background">
-                <History className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <SelectValue placeholder="选择以前买过的物资" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[280px]">
-                {historyTemplates.map(order => (
-                  <SelectItem key={order.id} value={order.id}>
-                    {order.itemName} · {order.unit} · {order.purchaseDate}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1.5 text-xs text-muted-foreground">带入最近一次填写的信息后，可修改本次数量、价格和其他内容；采购日期保持今天，生产日期留空。</p>
-          </div>
-        )}
         <ProductImageField
           imageUrls={form.imageUrls}
           onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
           onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
         />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>品牌（可选）</Label>
+            <Input value={form.brand} onChange={e => setForm(p => ({ ...p, brand: e.target.value }))} placeholder="如：麦德氏" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>物资名称</Label>
+            <HistoryItemAutocomplete
+              value={form.itemName}
+              orders={orders}
+              onChange={itemName => setForm(current => ({ ...current, itemName }))}
+              onSelect={applyHistoryTemplate}
+              placeholder="输入品牌或名称联想历史物资"
+            />
+          </div>
+        </div>
         <div className="space-y-1.5">
           <Label>物资系列 / 大标题（可选）</Label>
           <Input value={form.itemGroup} onChange={e => setForm(p => ({ ...p, itemGroup: e.target.value }))} placeholder="如：原切冻干" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>物资名称</Label>
-          <Input value={form.itemName} onChange={e => setForm(p => ({ ...p, itemName: e.target.value }))} placeholder="如：皇家猫粮 K36" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
@@ -1551,8 +1706,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>供应商</Label>
-            <Input value={form.supplier} onChange={e => setForm(p => ({ ...p, supplier: e.target.value }))} placeholder="供应商名称" />
+            <Label>购买渠道 / 商家（可选）</Label>
+            <Input value={form.supplier} onChange={e => setForm(p => ({ ...p, supplier: e.target.value }))} placeholder="如：抖音直播间、宠物店" />
           </div>
         </div>
         <div className="space-y-1.5">

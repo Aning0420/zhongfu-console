@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `你是"钟福供养办事处"的猫咪管理助手，负�
 
 ### 采购录入
 ---SYNC_DATA_START---
-{"type":"procurement","data":{"item_name":"具体物品名或口味","item_group":"系列/大标题或空字符串","category":"物品细分类","quantity":数量,"unit":"单位","package_size":每个库存单位内含数量或null,"package_unit":"片/粒/g等或空字符串","total_price":本次实付总价,"supplier":"供应商","product_benefits":"包装宣称或常见用途","suitable_life_stages":"适合的猫咪阶段","feeding_guidance":"按包装和兽医建议整理的喂食提示"}}
+{"type":"procurement","data":{"brand":"品牌或空字符串","item_name":"具体物品名或口味","item_group":"系列/大标题或空字符串","category":"物品细分类","quantity":数量,"unit":"单位","package_size":每个库存单位内含数量或null,"package_unit":"片/粒/g等或空字符串","total_price":本次实付总价,"supplier":"供应商","product_benefits":"包装宣称或常见用途","suitable_life_stages":"适合的猫咪阶段","feeding_guidance":"按包装和兽医建议整理的喂食提示"}}
 ---SYNC_DATA_END---
 
 ### 支出录入

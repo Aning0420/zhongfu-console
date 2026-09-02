@@ -3,6 +3,8 @@ import { localDateKey } from '@/lib/local-date';
 export interface Order {
   id: string;
   catId?: string;
+  /** Product brand, kept separate from a series/group name. */
+  brand?: string;
   itemName: string;
   /** Optional series/group heading shared by related flavors or variants. */
   itemGroup?: string;
@@ -452,6 +454,7 @@ export interface CatProfile {
 }
 
 export interface AppState {
+  dataVersion?: number;
   cats: CatProfile[];
   activeCatId?: string;
   orders: Order[];
@@ -463,6 +466,7 @@ export interface AppState {
 }
 
 const STORAGE_KEY = 'zhongfu-console-data';
+const CURRENT_DATA_VERSION = 2;
 
 export interface AppBackup {
   app: 'zhongfu-console';
@@ -539,6 +543,7 @@ const defaultCats: CatProfile[] = [
 
 function initialAppState(): AppState {
   return {
+    dataVersion: CURRENT_DATA_VERSION,
     cats: defaultCats,
     activeCatId: 'cat-zhongfu',
     orders: defaultOrders,
@@ -620,6 +625,7 @@ export function parseBackup(raw: string): AppState {
   }
 
   return migrateLegacyDemoData({
+    dataVersion: typeof candidate.dataVersion === 'number' ? candidate.dataVersion : undefined,
     cats: Array.isArray(candidate.cats) ? candidate.cats as CatProfile[] : [],
     activeCatId: typeof candidate.activeCatId === 'string' ? candidate.activeCatId : undefined,
     orders: candidate.orders as Order[],
@@ -633,6 +639,7 @@ export function parseBackup(raw: string): AppState {
 
 /** Remove only the two original seeded rows the user previously deleted. */
 function migrateLegacyDemoData(state: AppState): AppState {
+  const moveLegacySupplierToBrand = (state.dataVersion ?? 1) < 2;
   const removedOrderIds = new Set(['o1', 'o2']);
   const removedExpenseIds = new Set(['e1', 'e2']);
   const existingCats = Array.isArray(state.cats)
@@ -645,6 +652,7 @@ function migrateLegacyDemoData(state: AppState): AppState {
   ];
   return {
     ...state,
+    dataVersion: CURRENT_DATA_VERSION,
     cats,
     activeCatId: state.activeCatId && cats.some(cat => cat.id === state.activeCatId)
       ? state.activeCatId
@@ -662,6 +670,8 @@ function migrateLegacyDemoData(state: AppState): AppState {
         return {
           ...order,
           catId: 'shared',
+          brand: order.brand?.trim() || (moveLegacySupplierToBrand ? order.supplier?.trim() || undefined : undefined),
+          supplier: moveLegacySupplierToBrand && !order.brand?.trim() && order.supplier?.trim() ? '' : order.supplier,
           imageUrls: imageUrls.length ? imageUrls : undefined,
           imageUrl: imageUrls[0] || undefined,
         };

@@ -1,6 +1,7 @@
 import { normalizeInventoryCategory } from '@/lib/inventory-categories';
 
 export interface ProductImageAnalysis {
+  brand?: string;
   itemName?: string;
   itemGroup?: string;
   category?: string;
@@ -146,6 +147,7 @@ export async function analyzeProductImage(image: string): Promise<ProductImageAn
   }
   const data = parsed.data;
   return {
+    brand: stringValue(data.brand),
     itemName: stringValue(data.item_name),
     itemGroup: stringValue(data.item_group),
     category: data.category ? normalizeInventoryCategory(data.category) : undefined,
@@ -172,6 +174,7 @@ export async function analyzeProductImages(images: string[]): Promise<ProductIma
     throw firstFailure?.reason instanceof Error ? firstFailure.reason : new Error('图片识别失败');
   }
   return successful.reduce<ProductImageAnalysis>((combined, current) => ({
+    brand: combined.brand || current.brand,
     itemName: combined.itemName || current.itemName,
     itemGroup: combined.itemGroup || current.itemGroup,
     category: combined.category || current.category,

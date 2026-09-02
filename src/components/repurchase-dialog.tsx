@@ -37,7 +37,9 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
 
     addOrder({
       catId: 'shared',
+      brand: order.brand,
       itemName: order.itemName,
+      itemGroup: order.itemGroup,
       category: order.category,
       quantity,
       unit: form.unit.trim() || order.unit,
@@ -47,6 +49,15 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
       status: form.status,
       consumed: 0,
       supplier: form.supplier.trim() || order.supplier,
+      shelfLife: order.shelfLife,
+      shelfLifeUnit: order.shelfLifeUnit,
+      packageSize: order.packageSize,
+      packageUnit: order.packageUnit,
+      imageUrls: order.imageUrls,
+      imageUrl: order.imageUrl,
+      productBenefits: order.productBenefits,
+      suitableLifeStages: order.suitableLifeStages,
+      feedingGuidance: order.feedingGuidance,
     });
     markOrderRepurchased(order.id, form.purchaseDate);
 
@@ -67,7 +78,7 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
-          <DialogTitle>记录回购：{order.itemName}</DialogTitle>
+          <DialogTitle>记录回购：{[order.brand, order.itemName].filter(Boolean).join(' ')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-2">
           <div className="grid grid-cols-2 gap-3">

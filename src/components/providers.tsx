@@ -152,7 +152,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const applyCloudState = useCallback((data: AppState, revision: number, updatedAt: string) => {
     const validated = parseBackup(JSON.stringify(data));
-    suppressUploadRef.current = true;
+    const migrated = JSON.stringify(validated) !== JSON.stringify(data);
+    // A one-time data migration must be written back so every device sees the
+    // same shape. Unchanged cloud snapshots should not be echoed back.
+    suppressUploadRef.current = !migrated;
     revisionRef.current = revision;
     stateRef.current = validated;
     saveState(validated);
