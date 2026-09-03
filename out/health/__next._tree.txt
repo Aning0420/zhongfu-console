@@ -1,2 +1,0 @@
-:HL["/zhongfu-console/_next/static/css/0713fae4af8f5bcc.css","style"]
-0:{"buildId":"40hyCBO7TqKdFfjXLVM63","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"health","paramType":null,"paramKey":"health","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":true},"staleTime":300}
