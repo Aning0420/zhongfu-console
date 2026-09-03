@@ -81,26 +81,48 @@ export function getPriceHistory(
   unit: string,
   currentUnitPrice: number,
   orders: Order[],
+  options?: {
+    packageCount?: number;
+    packageCountUnit?: string;
+    packageSize?: number;
+    packageUnit?: string;
+    currentOrderId?: string;
+  },
 ): PriceHistory | null {
   if (!itemName.trim() || !unit.trim() || !Number.isFinite(currentUnitPrice) || currentUnitPrice <= 0) return null;
 
   const normalizedName = normalizeProductIdentity(itemName);
   const normalizedUnit = normalizeProductIdentity(unit);
+  const normalizedPackageCountUnit = normalizeProductIdentity(options?.packageCountUnit || '');
+  const normalizedPackageUnit = normalizeProductIdentity(options?.packageUnit || '');
+  const sameOptionalNumber = (left: number | undefined, right: number | undefined) =>
+    (left === undefined || left === null ? undefined : left) === (right === undefined || right === null ? undefined : right);
+  const packageSpecMatches = (order: Order) => options === undefined || (
+    sameOptionalNumber(order.packageCount, options.packageCount)
+    && normalizeProductIdentity(order.packageCountUnit || '') === normalizedPackageCountUnit
+    && sameOptionalNumber(order.packageSize, options.packageSize)
+    && normalizeProductIdentity(order.packageUnit || '') === normalizedPackageUnit
+  );
   const matches = orders.filter(order =>
     order.status !== 'cancelled'
     && order.unitPrice > 0
     && normalizeProductIdentity(order.itemName) === normalizedName
     && normalizeProductIdentity(order.unit) === normalizedUnit
+    && packageSpecMatches(order)
   );
-  if (matches.length === 0) return null;
+  const historicalMatches = matches
+    .filter(order => order.id !== options?.currentOrderId)
+    .sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || a.id.localeCompare(b.id));
+  if (historicalMatches.length === 0) return null;
 
-  const lastUnitPrice = matches[matches.length - 1].unitPrice;
-  const lowestUnitPrice = Math.min(...matches.map(order => order.unitPrice));
+  const lastUnitPrice = historicalMatches[historicalMatches.length - 1].unitPrice;
+  const lowestUnitPrice = Math.min(...historicalMatches.map(order => order.unitPrice));
   return {
     lastUnitPrice,
     lowestUnitPrice,
     changePercent: ((currentUnitPrice - lastUnitPrice) / lastUnitPrice) * 100,
-    isHistoricalLow: currentUnitPrice <= lowestUnitPrice * (1 + 0.0001),
+    // Equal prices are not new lows. Only a strictly lower purchase gets the badge.
+    isHistoricalLow: currentUnitPrice < lowestUnitPrice - 0.0001,
   };
 }
 

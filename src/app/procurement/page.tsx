@@ -640,7 +640,6 @@ export default function ProcurementPage() {
                 const depletion = getDepletionInfo(order, catFeedingRecords);
                 const needsRestock = order.status === 'delivered' && !order.repurchasedAt
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
-                const sourceOrderIndex = state.orders.findIndex(item => item.id === order.id);
                 const showGroupHeading = Boolean(order.itemGroup && filteredOrders[visibleIndex - 1]?.itemGroup !== order.itemGroup);
                 const showBundlePrice = !order.purchaseBatchId || filteredOrders[visibleIndex - 1]?.purchaseBatchId !== order.purchaseBatchId;
                 const coverImage = order.imageUrls?.[0] || order.imageUrl || (order.purchaseBatchId ? purchaseBatchCovers.get(order.purchaseBatchId) : undefined);
@@ -648,7 +647,14 @@ export default function ProcurementPage() {
                   order.itemName,
                   order.unit,
                   order.unitPrice,
-                  sourceOrderIndex > 0 ? state.orders.slice(0, sourceOrderIndex) : [],
+                  state.orders,
+                  {
+                    packageCount: order.packageCount,
+                    packageCountUnit: order.packageCountUnit,
+                    packageSize: order.packageSize,
+                    packageUnit: order.packageUnit,
+                    currentOrderId: order.id,
+                  },
                 );
                 return (
                   <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
