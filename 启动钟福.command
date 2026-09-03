@@ -18,7 +18,7 @@ if /usr/bin/curl --silent --fail --max-time 2 "$URL" >/dev/null 2>&1; then
 fi
 
 if [[ ! -x "$RUNTIME_DIR/node/bin/node" || ! -x "$RUNTIME_DIR/node/bin/pnpm" ]]; then
-  /usr/bin/osascript -e 'display dialog "钟福运行环境不完整，请联系维护人员。" buttons {"好"} default button "好" with icon stop'
+  /usr/bin/osascript -e 'display dialog "福七之家运行环境不完整，请联系维护人员。" buttons {"好"} default button "好" with icon stop'
   exit 1
 fi
 
@@ -38,6 +38,6 @@ for _ in {1..60}; do
   sleep 1
 done
 
-/usr/bin/osascript -e 'display dialog "钟福启动失败，已打开运行日志。" buttons {"好"} default button "好" with icon stop'
+/usr/bin/osascript -e 'display dialog "福七之家启动失败，已打开运行日志。" buttons {"好"} default button "好" with icon stop'
 /usr/bin/open "$LOG_FILE"
 exit 1

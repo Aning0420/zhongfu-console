@@ -5,9 +5,9 @@ import AppShell from '@/components/app-shell';
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 export const metadata: Metadata = {
-  applicationName: '钟福供养办事处',
-  title: '钟福供养办事处',
-  description: '钟福生活管理中控台 - 采购、喂食、健康、支出一站式管理',
+  applicationName: '福七之家',
+  title: '福七之家',
+  description: '猫咪生活管理中控台 - 采购、喂食、健康、支出一站式管理',
   formatDetection: {
     telephone: false,
   },
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   manifest: `${basePath}/manifest.json`,
   appleWebApp: {
     capable: true,
-    title: '钟福供养办事处',
+    title: '福七之家',
     statusBarStyle: 'black-translucent',
   },
 };

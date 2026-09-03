@@ -27,7 +27,7 @@ const CATEGORIES = [
   '猫砂与清洁', '喂养用品', '洗护用品', '玩具', '居家用品', '外出用品', '其他用品',
 ];
 
-const SYSTEM_PROMPT = `你是“钟福供养办事处”的猫咪生活管理助手。请使用简洁、自然的中文回答。
+const SYSTEM_PROMPT = `你是“福七之家”的猫咪生活管理助手。请使用简洁、自然的中文回答。
 
 当用户要求记录数据时，在正常回复末尾追加一段结构化数据，必须严格使用下面的标记：
 ---SYNC_DATA_START---
@@ -440,7 +440,7 @@ const worker = {
         ...(typeof body.image === 'string' && body.image ? [body.image] : []),
       ])).slice(0, 4).map(validateImage);
       const contextualPrompt = appContext
-        ? `${SYSTEM_PROMPT}\n\n以下是钟福供养办事处当前应用数据摘要，仅用于回答当前问题：\n${appContext}`
+        ? `${SYSTEM_PROMPT}\n\n以下是福七之家当前应用数据摘要，仅用于回答当前问题：\n${appContext}`
         : SYSTEM_PROMPT;
 
       let result: unknown;

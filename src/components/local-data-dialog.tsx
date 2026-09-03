@@ -14,7 +14,7 @@ interface LocalDataDialogProps {
 
 function backupFilename() {
   const date = localDateKey();
-  return `钟福供养办事处-数据备份-${date}.json`;
+  return `福七之家-数据备份-${date}.json`;
 }
 
 export function LocalDataDialog({ open, onClose }: LocalDataDialogProps) {
@@ -35,7 +35,7 @@ export function LocalDataDialog({ open, onClose }: LocalDataDialogProps) {
     try {
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({
-          title: '钟福供养办事处数据备份',
+          title: '福七之家数据备份',
           files: [file],
         });
         setStatus('备份已交给系统保存或分享');

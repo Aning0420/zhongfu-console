@@ -624,7 +624,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const greeting: ChatMessage = {
       id: genId('c'),
       role: 'assistant',
-      content: '你好！我是钟福的专属助手，有什么可以帮你的吗？你可以问我关于喂食、支出、健康等方面的问题。',
+      content: '你好！我是福七之家助手，有什么可以帮你的吗？你可以问我关于喂食、支出、健康等方面的问题。',
       timestamp: new Date().toISOString(),
     };
     setState(prev => ({ ...prev, chatMessages: [greeting] }));
