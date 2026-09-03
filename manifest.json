@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "钟福供养办事处",
-  "short_name": "钟福供养",
-  "description": "钟福的采购、喂食、健康与支出管理应用",
+  "name": "福七之家",
+  "short_name": "福七之家",
+  "description": "猫咪的采购、喂食、健康与支出管理应用",
   "lang": "zh-CN",
   "dir": "ltr",
   "start_url": "./",
