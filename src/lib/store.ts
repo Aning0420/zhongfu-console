@@ -103,20 +103,23 @@ export function getPriceHistory(
     && sameOptionalNumber(order.packageSize, options.packageSize)
     && normalizeProductIdentity(order.packageUnit || '') === normalizedPackageUnit
   );
-  const matches = orders.filter(order =>
+  const isComparableOrder = (order: Order) =>
     order.status !== 'cancelled'
     && order.unitPrice > 0
     && normalizeProductIdentity(order.itemName) === normalizedName
     && normalizeProductIdentity(order.unit) === normalizedUnit
-    && packageSpecMatches(order)
-  );
-  const historicalMatches = matches
-    .filter(order => order.id !== options?.currentOrderId)
-    .sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || a.id.localeCompare(b.id));
-  if (historicalMatches.length === 0) return null;
+    && packageSpecMatches(order);
+  const comparableOrders = orders.filter(order => order.id !== options?.currentOrderId && isComparableOrder(order));
+  const currentOrderIndex = options?.currentOrderId
+    ? orders.findIndex(order => order.id === options.currentOrderId)
+    : -1;
+  const previousOrders = currentOrderIndex >= 0
+    ? orders.slice(0, currentOrderIndex).filter(isComparableOrder)
+    : comparableOrders;
+  if (previousOrders.length === 0) return null;
 
-  const lastUnitPrice = historicalMatches[historicalMatches.length - 1].unitPrice;
-  const lowestUnitPrice = Math.min(...historicalMatches.map(order => order.unitPrice));
+  const lastUnitPrice = previousOrders[previousOrders.length - 1].unitPrice;
+  const lowestUnitPrice = Math.min(...comparableOrders.map(order => order.unitPrice));
   return {
     lastUnitPrice,
     lowestUnitPrice,
