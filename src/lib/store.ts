@@ -531,6 +531,8 @@ export interface HealthRecord {
 export interface Expense {
   id: string;
   catId?: string;
+  /** Procurement order records linked to an automatically generated expense. */
+  relatedOrderIds?: string[];
   date: string;
   category: string;
   amount: number;

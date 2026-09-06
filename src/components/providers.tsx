@@ -45,7 +45,7 @@ interface AppContextType {
   updateCat: (id: string, updates: Partial<Omit<CatProfile, 'id' | 'createdAt'>>) => void;
   deleteCat: (id: string) => void;
   setActiveCat: (id: string) => void;
-  addOrder: (order: Omit<Order, 'id'>) => void;
+  addOrder: (order: Omit<Order, 'id'>) => string;
   updateOrder: (id: string, updates: Partial<Omit<Order, 'id'>>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
   markOrderRepurchased: (id: string, date: string) => void;
@@ -318,12 +318,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...prev,
       orders: [...prev.orders, { ...order, id, catId: 'shared' }],
     }));
+    return id;
   }, []);
 
   const updateOrder = useCallback((id: string, updates: Partial<Omit<Order, 'id'>>) => {
-    setState(prev => ({
-      ...prev,
-      orders: prev.orders.map(order => {
+    setState(prev => {
+      const orders = prev.orders.map(order => {
         if (order.id !== id) return order;
         const quantity = Number.isFinite(updates.quantity) && (updates.quantity ?? 0) > 0
           ? updates.quantity!
@@ -375,8 +375,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           };
         }
         return { ...next, status: nextStatus };
-      }),
-    }));
+      });
+      const expenses = updates.purchaseDate
+        ? prev.expenses.map(expense => {
+          if (!expense.relatedOrderIds?.includes(id)) return expense;
+          return { ...expense, date: updates.purchaseDate! };
+        })
+        : prev.expenses;
+      return { ...prev, orders, expenses };
+    });
   }, []);
 
   const updateOrderStatus = useCallback((id: string, status: Order['status']) => {

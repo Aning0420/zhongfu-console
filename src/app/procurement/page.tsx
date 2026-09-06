@@ -1729,7 +1729,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           {quantity < order.consumed && (
             <p className="text-xs text-[#C56C5C]">总数量小于当前已领用数量，保存后已领用数量会同步调整为 {quantity}{form.unit}。</p>
           )}
-          <p className="text-xs text-muted-foreground">这里仅修改采购记录；新建采购时同步生成的历史支出不会自动改动。</p>
+          <p className="text-xs text-muted-foreground">修改采购日期时，系统会同步更新由这笔采购自动生成的支出日期；手动添加的支出不会改动。</p>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>取消</Button>
             <Button disabled={!valid} onClick={handleSave}>保存修改</Button>
@@ -1740,7 +1740,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   );
 }
 
-function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => void; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
+function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => string; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [mode, setMode] = useState<'single' | 'mixed' | 'bundle'>('single');
   const [form, setForm] = useState({
     brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
@@ -1833,7 +1833,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       if (!mixedValid) return;
       const purchaseBatchId = `bundle-${Date.now()}`;
       const bundleName = form.bundleName.trim();
-      mixedFlavors.forEach((flavor, index) => onAdd({
+      const relatedOrderIds = mixedFlavors.map((flavor, index) => onAdd({
         catId: 'shared',
         brand: form.brand.trim() || undefined,
         itemName: flavor.name.trim(),
@@ -1871,6 +1871,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           amount: totalPrice,
           description: `多口味整盒·${bundleName}：${mixedFlavors.map(flavor => flavor.name.trim()).join('、')}`,
           relatedModule: 'procurement',
+          relatedOrderIds,
         });
       }
       onClose();
@@ -1880,10 +1881,10 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       if (!bundleValid) return;
       const purchaseBatchId = `bundle-${Date.now()}`;
       const bundleName = form.bundleName.trim();
-      bundleItems.forEach(item => {
+      const relatedOrderIds = bundleItems.map(item => {
         const itemQuantity = Number(item.quantity);
         const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
-        onAdd({
+        return onAdd({
           catId: 'shared',
           brand: item.brand.trim() || undefined,
           itemName: item.itemName.trim(),
@@ -1914,13 +1915,14 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       if (form.syncExpense && totalPrice > 0) {
         const hasExactAllocation = Math.abs(bundleRemaining) < 0.005 && bundleItems.every(item => Number(item.allocatedPrice) > 0);
         if (hasExactAllocation) {
-          bundleItems.forEach(item => addExpense({
+          bundleItems.forEach((item, index) => addExpense({
             catId: 'shared',
             date: form.purchaseDate,
             category: item.category,
             amount: Number(item.allocatedPrice),
             description: `组合采购·${item.itemName.trim()}`,
             relatedModule: 'procurement',
+            relatedOrderIds: [relatedOrderIds[index]],
           }));
         } else {
           addExpense({
@@ -1932,6 +1934,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
               ? `组合采购·${bundleName}：${bundleItems.map(item => item.itemName.trim()).join('、')}`
               : `组合采购：${bundleItems.map(item => item.itemName.trim()).join('、')}`,
             relatedModule: 'procurement',
+            relatedOrderIds,
           });
         }
       }
@@ -1940,7 +1943,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     }
     const packageValid = packageFieldsValid(form.packageCount, form.packageCountUnit, form.packageSize, form.packageUnit);
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
-    onAdd({
+    const relatedOrderId = onAdd({
       catId: 'shared',
       brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
@@ -1975,6 +1978,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         amount: totalPrice,
         description: `采购${form.itemName}`,
         relatedModule: 'procurement',
+        relatedOrderIds: [relatedOrderId],
       });
     }
     onClose();
