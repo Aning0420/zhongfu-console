@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import Image from 'next/image';
 import type { Expense } from '@/lib/store';
-import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, hasOtherAvailableInventory, inventoryProductKey, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
+import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, hasOtherAvailableInventory, inventoryProductKey, inventoryRemaining, normalizeConfiguredDailyUsage, orderPurchasePackSize, orderPurchaseQuantity, orderPurchaseUnit, orderPurchaseUnitPrice, orderTotalPrice } from '@/lib/store';
 import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
@@ -82,15 +82,11 @@ function productDisplayName(order: Order): string {
 
 function packageConversionLabel(order: Order): string {
   const parts: string[] = [];
-  if (order.packageCount && order.packageCountUnit) {
-    parts.push(`1${order.unit} = ${order.packageCount}${order.packageCountUnit}`);
-  }
+  const purchaseUnit = orderPurchaseUnit(order);
+  const packSize = orderPurchasePackSize(order);
+  if (packSize > 1) parts.push(`1${purchaseUnit} = ${packSize}${order.unit}`);
   if (order.packageSize && order.packageUnit) {
-    const sourceUnit = order.packageCount && order.packageCountUnit ? order.packageCountUnit : order.unit;
-    parts.push(`1${sourceUnit} = ${order.packageSize}${order.packageUnit}`);
-    if (order.packageCount && order.packageCountUnit) {
-      parts.push(`每${order.unit}共${order.packageCount * order.packageSize}${order.packageUnit}`);
-    }
+    parts.push(`1${order.unit} = ${order.packageSize}${order.packageUnit}`);
   }
   return parts.join('；');
 }
@@ -102,7 +98,7 @@ function bundlePriceLabel(order: Order): string | null {
 }
 
 function inventoryOperationUnits(order: Order): string[] {
-  return [order.unit, order.packageCountUnit, order.packageUnit]
+  return [order.unit, order.purchaseUnit, order.packageCountUnit, order.packageUnit]
     .filter((unit): unit is string => Boolean(unit?.trim()))
     .filter((unit, index, units) => units.findIndex(item => normalizeHistorySearch(item) === normalizeHistorySearch(unit)) === index);
 }
@@ -702,16 +698,10 @@ export default function ProcurementPage() {
                 const coverImage = order.imageUrls?.[0] || order.imageUrl || (order.purchaseBatchId ? purchaseBatchCovers.get(order.purchaseBatchId) : undefined);
                 const priceHistory = getPriceHistory(
                   order.itemName,
-                  order.unit,
-                  order.unitPrice,
+                  orderPurchaseUnit(order),
+                  orderPurchaseUnitPrice(order),
                   state.orders,
-                  {
-                    packageCount: order.packageCount,
-                    packageCountUnit: order.packageCountUnit,
-                    packageSize: order.packageSize,
-                    packageUnit: order.packageUnit,
-                    currentOrderId: order.id,
-                  },
+                  { currentOrderId: order.id },
                 );
                 return (
                   <tr key={order.id} className="group border-b border-border/50 transition-colors hover:bg-muted/20">
@@ -781,7 +771,7 @@ export default function ProcurementPage() {
                         <div className="whitespace-nowrap text-xs text-muted-foreground">同一整盒采购</div>
                       ) : (
                         <>
-                          <div className="whitespace-nowrap font-medium">¥{order.unitPrice.toFixed(2)}/{order.unit}</div>
+                          <div className="whitespace-nowrap font-medium">¥{orderPurchaseUnitPrice(order).toFixed(2)}/{orderPurchaseUnit(order)}</div>
                           <div className="whitespace-nowrap text-xs text-muted-foreground">本次共 ¥{orderTotalPrice(order).toFixed(2)}</div>
                           {priceHistory && <PriceChangeLabel history={priceHistory} />}
                         </>
@@ -1526,16 +1516,16 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     itemName: order.itemName,
     itemGroup: order.itemGroup || '',
     category: order.category,
-    quantity: String(order.quantity),
-    unit: order.unit,
+    quantity: String(orderPurchaseQuantity(order)),
+    unit: orderPurchaseUnit(order),
     totalPrice: String(orderTotalPrice(order)),
     supplier: order.supplier,
     purchaseDate: order.purchaseDate,
     productionDate: order.productionDate || '',
     shelfLife: initialShelfLife.value,
     shelfLifeUnit: initialShelfLife.unit,
-    packageCount: order.packageCount ? String(order.packageCount) : '',
-    packageCountUnit: order.packageCountUnit || '',
+    packageCount: orderPurchasePackSize(order) > 1 ? String(orderPurchasePackSize(order)) : '',
+    packageCountUnit: orderPurchasePackSize(order) > 1 ? order.unit : '',
     packageSize: order.packageSize ? String(order.packageSize) : '',
     packageUnit: order.packageUnit || '',
     imageUrls: order.imageUrls?.length ? order.imageUrls : order.imageUrl ? [order.imageUrl] : [],
@@ -1547,6 +1537,9 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   const quantity = Number(form.quantity);
   const totalPrice = Number(form.totalPrice);
   const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
+  const editPackSize = form.packageCount ? Number(form.packageCount) : form.packageSize ? Number(form.packageSize) : 1;
+  const inventoryQuantity = quantity > 0 && Number.isFinite(editPackSize) ? quantity * editPackSize : 0;
+  const inventoryUnit = form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim());
   const comparableOrders = orders.filter(item => item.id !== order.id);
   const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, comparableOrders);
   const packageValid = packageFieldsValid(form.packageCount, form.packageCountUnit, form.packageSize, form.packageUnit);
@@ -1568,17 +1561,21 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
-      quantity,
-      unit: form.unit.trim(),
-      unitPrice,
+      quantity: quantity * (form.packageCount ? Number(form.packageCount) : 1),
+      unit: form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim()),
+      unitPrice: quantity > 0 ? totalPrice / (quantity * (form.packageCount ? Number(form.packageCount) : 1)) : 0,
       totalPrice,
+      purchaseUnit: form.unit.trim(),
+      purchaseQuantity: quantity,
+      purchasePackSize: form.packageCount ? Number(form.packageCount) : form.packageSize ? Number(form.packageSize) : 1,
+      purchaseUnitPrice: unitPrice,
       supplier: form.supplier.trim(),
       purchaseDate: form.purchaseDate,
       productionDate: form.productionDate || undefined,
       shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
-      packageCount: form.packageCount ? Number(form.packageCount) : undefined,
-      packageCountUnit: form.packageCount ? form.packageCountUnit.trim() || undefined : undefined,
+      packageCount: undefined,
+      packageCountUnit: undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
       imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
@@ -1621,12 +1618,12 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
                     itemName: template.itemName,
                     itemGroup: template.itemGroup || '',
                     category: template.category,
-                    unit: template.unit,
+                    unit: orderPurchaseUnit(template),
                     supplier: template.supplier,
                     shelfLife: shelfLife.value,
                     shelfLifeUnit: shelfLife.unit,
-                    packageCount: template.packageCount ? String(template.packageCount) : '',
-                    packageCountUnit: template.packageCountUnit || '',
+                    packageCount: orderPurchasePackSize(template) > 1 ? String(orderPurchasePackSize(template)) : '',
+                    packageCountUnit: orderPurchasePackSize(template) > 1 ? template.unit : '',
                     packageSize: template.packageSize ? String(template.packageSize) : '',
                     packageUnit: template.packageUnit || '',
                     imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
@@ -1674,12 +1671,12 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label>数量</Label>
+              <Label>采购数量</Label>
               <Input type="number" min="0" step="any" value={form.quantity} onChange={event => setForm(current => ({ ...current, quantity: event.target.value }))} />
             </div>
             <div className="space-y-1.5">
-              <Label>单位</Label>
-              <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => item.unit)} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="盒/包/袋/kg" />
+              <Label>采购单位</Label>
+              <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => orderPurchaseUnit(item))} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="盒/包/袋/kg" />
             </div>
             <div className="space-y-1.5">
               <Label>本次总价(¥)</Label>
@@ -1691,7 +1688,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
             <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
               <span className="text-sm text-muted-foreground">每{form.unit.trim() || '单位'}含</span>
               <Input type="number" min="0" step="any" value={form.packageCount} onChange={event => setForm(current => ({ ...current, packageCount: event.target.value }))} placeholder="如：6" />
-              <HistoryTextAutocomplete value={form.packageCountUnit} values={recentOrderValues(orders, item => item.packageCountUnit)} onChange={packageCountUnit => setForm(current => ({ ...current, packageCountUnit }))} placeholder="包/袋/板" />
+              <HistoryTextAutocomplete value={form.packageCountUnit} values={recentOrderValues(orders, item => item.packageCountUnit || item.unit)} onChange={packageCountUnit => setForm(current => ({ ...current, packageCountUnit }))} placeholder="罐/袋/杯/片" />
             </div>
             <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
               <span className="text-sm text-muted-foreground">每{form.packageCountUnit.trim() || form.unit.trim() || '单位'}含</span>
@@ -1702,7 +1699,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           </div>
           {unitPrice > 0 && (
             <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
-              <div className="font-medium text-foreground">自动换算：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
+              <div className="font-medium text-foreground">采购单价：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
+              {inventoryQuantity > 0 && inventoryUnit && <div className="mt-0.5 text-muted-foreground">入库：{inventoryQuantity}{inventoryUnit}（库存基本单位）</div>}
               {priceHistory && <PriceChangeLabel history={priceHistory} />}
             </div>
           )}
@@ -1726,8 +1724,8 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
               onUnitChange={shelfLifeUnit => setForm(current => ({ ...current, shelfLifeUnit }))}
             />
           </div>
-          {quantity < order.consumed && (
-            <p className="text-xs text-[#C56C5C]">总数量小于当前已领用数量，保存后已领用数量会同步调整为 {quantity}{form.unit}。</p>
+          {quantity * (form.packageCount ? Number(form.packageCount) : 1) < order.consumed && (
+            <p className="text-xs text-[#C56C5C]">库存数量小于当前已领用数量，保存后已领用数量会同步调整为 {quantity * (form.packageCount ? Number(form.packageCount) : 1)}{form.packageCountUnit || form.unit}。</p>
           )}
           <p className="text-xs text-muted-foreground">修改采购日期时，系统会同步更新由这笔采购自动生成的支出日期；手动添加的支出不会改动。</p>
           <div className="flex justify-end gap-2 pt-1">
@@ -1766,15 +1764,15 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       itemName: template.itemName,
       itemGroup: template.itemGroup || '',
       category: template.category,
-      quantity: String(template.quantity),
-      unit: template.unit,
+      quantity: String(orderPurchaseQuantity(template)),
+      unit: orderPurchaseUnit(template),
       totalPrice: String(orderTotalPrice(template)),
       supplier: template.supplier,
       productionDate: '',
       shelfLife: shelfLife.value,
       shelfLifeUnit: shelfLife.unit,
-      packageCount: template.packageCount ? String(template.packageCount) : '',
-      packageCountUnit: template.packageCountUnit || '',
+      packageCount: orderPurchasePackSize(template) > 1 ? String(orderPurchasePackSize(template)) : '',
+      packageCountUnit: orderPurchasePackSize(template) > 1 ? template.unit : '',
       packageSize: template.packageSize ? String(template.packageSize) : '',
       packageUnit: template.packageUnit || '',
       imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
@@ -1787,6 +1785,9 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
   const quantity = Number(form.quantity);
   const totalPrice = Number(form.totalPrice);
   const unitPrice = quantity > 0 && totalPrice >= 0 ? totalPrice / quantity : 0;
+  const addPackSize = form.packageCount ? Number(form.packageCount) : form.packageSize ? Number(form.packageSize) : 1;
+  const addInventoryQuantity = quantity > 0 && Number.isFinite(addPackSize) ? quantity * addPackSize : 0;
+  const addInventoryUnit = form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim());
   const priceHistory = getPriceHistory(form.itemName, form.unit, unitPrice, orders);
   const bundleAllocated = bundleItems.reduce((sum, item) => sum + (Number(item.allocatedPrice) || 0), 0);
   const bundleRemaining = Number.isFinite(totalPrice) ? totalPrice - bundleAllocated : 0;
@@ -2073,12 +2074,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                           itemName: template.itemName,
                           itemGroup: template.itemGroup || '',
                           category: template.category,
-                          quantity: String(template.quantity),
-                          unit: template.unit,
+                          quantity: String(orderPurchaseQuantity(template)),
+                          unit: orderPurchaseUnit(template),
                           shelfLife: shelfLife.value,
                           shelfLifeUnit: shelfLife.unit,
-                          packageCount: template.packageCount ? String(template.packageCount) : '',
-                          packageCountUnit: template.packageCountUnit || '',
+                          packageCount: orderPurchasePackSize(template) > 1 ? String(orderPurchasePackSize(template)) : '',
+                          packageCountUnit: orderPurchasePackSize(template) > 1 ? template.unit : '',
                           packageSize: template.packageSize ? String(template.packageSize) : '',
                           packageUnit: template.packageUnit || '',
                         } : entry));
@@ -2112,7 +2113,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div className="space-y-1"><Label className="text-xs text-muted-foreground">每{item.unit || '单位'}含</Label><Input type="number" min="0" step="any" value={item.packageCount} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageCount: event.target.value } : entry))} placeholder="如：6" /></div>
-                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">中间单位</Label><HistoryTextAutocomplete value={item.packageCountUnit} values={recentOrderValues(orders, order => order.packageCountUnit)} onChange={packageCountUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageCountUnit } : entry))} placeholder="包/袋/板" /></div>
+                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">中间单位</Label><HistoryTextAutocomplete value={item.packageCountUnit} values={recentOrderValues(orders, order => order.packageCountUnit || order.unit)} onChange={packageCountUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageCountUnit } : entry))} placeholder="包/袋/杯/片" /></div>
                     <div className="space-y-1"><Label className="text-xs text-muted-foreground">每{item.packageCountUnit || item.unit || '单位'}含</Label><Input type="number" min="0" step="any" value={item.packageSize} onChange={event => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageSize: event.target.value } : entry))} placeholder="如：60" /></div>
                     <div className="space-y-1"><Label className="text-xs text-muted-foreground">最小单位</Label><HistoryTextAutocomplete value={item.packageUnit} values={recentOrderValues(orders, order => order.packageUnit)} onChange={packageUnit => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, packageUnit } : entry))} placeholder="片/粒/g" /></div>
                   </div>
@@ -2335,12 +2336,12 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div className="space-y-1.5">
-            <Label>数量</Label>
+            <Label>采购数量</Label>
             <Input type="number" value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} placeholder="0" />
           </div>
           <div className="space-y-1.5">
-            <Label>单位</Label>
-            <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => item.unit)} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="kg/包/袋" />
+            <Label>采购单位</Label>
+            <HistoryTextAutocomplete value={form.unit} values={recentOrderValues(orders, item => orderPurchaseUnit(item))} onChange={unit => setForm(current => ({ ...current, unit }))} placeholder="kg/包/袋" />
           </div>
           <div className="space-y-1.5">
             <Label>本次总价(¥)</Label>
@@ -2352,7 +2353,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
             <span className="text-sm text-muted-foreground">每{form.unit.trim() || '单位'}含</span>
             <Input type="number" min="0" step="any" value={form.packageCount} onChange={event => setForm(current => ({ ...current, packageCount: event.target.value }))} placeholder="如：6" />
-            <HistoryTextAutocomplete value={form.packageCountUnit} values={recentOrderValues(orders, item => item.packageCountUnit)} onChange={packageCountUnit => setForm(current => ({ ...current, packageCountUnit }))} placeholder="包/袋/板" />
+            <HistoryTextAutocomplete value={form.packageCountUnit} values={recentOrderValues(orders, item => item.packageCountUnit || item.unit)} onChange={packageCountUnit => setForm(current => ({ ...current, packageCountUnit }))} placeholder="罐/袋/杯/片" />
           </div>
           <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
             <span className="text-sm text-muted-foreground">每{form.packageCountUnit.trim() || form.unit.trim() || '单位'}含</span>
@@ -2363,7 +2364,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
         </div>
         {unitPrice > 0 && (
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
-            <div className="font-medium text-foreground">自动换算：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
+            <div className="font-medium text-foreground">采购单价：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
+            {addInventoryQuantity > 0 && addInventoryUnit && <div className="mt-0.5 text-muted-foreground">入库：{addInventoryQuantity}{addInventoryUnit}（库存基本单位）</div>}
             {priceHistory ? (
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
                 <span>上次 ¥{priceHistory.lastUnitPrice.toFixed(2)}/{form.unit}</span>

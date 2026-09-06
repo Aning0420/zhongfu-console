@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getPriceHistory, type Order } from '@/lib/store';
+import { getPriceHistory, orderPurchasePackSize, orderPurchaseQuantity, orderPurchaseUnit, type Order } from '@/lib/store';
 import { localDateKey } from '@/lib/local-date';
 
 export function RepurchaseDialog({ order, open, onOpenChange }: {
@@ -18,8 +18,8 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
 }) {
   const { state, addOrder, addExpense, markOrderRepurchased } = useAppContext();
   const [form, setForm] = useState({
-    quantity: String(order.quantity),
-    unit: order.unit,
+    quantity: String(orderPurchaseQuantity(order)),
+    unit: orderPurchaseUnit(order),
     totalPrice: '',
     supplier: order.supplier,
     purchaseDate: localDateKey(),
@@ -41,10 +41,14 @@ export function RepurchaseDialog({ order, open, onOpenChange }: {
       itemName: order.itemName,
       itemGroup: order.itemGroup,
       category: order.category,
-      quantity,
-      unit: form.unit.trim() || order.unit,
-      unitPrice,
+      quantity: quantity * orderPurchasePackSize(order),
+      unit: order.unit,
+      unitPrice: quantity > 0 ? totalPrice / (quantity * orderPurchasePackSize(order)) : 0,
       totalPrice,
+      purchaseUnit: form.unit.trim() || orderPurchaseUnit(order),
+      purchaseQuantity: quantity,
+      purchasePackSize: orderPurchasePackSize(order),
+      purchaseUnitPrice: unitPrice,
       purchaseDate: form.purchaseDate,
       status: form.status,
       consumed: 0,

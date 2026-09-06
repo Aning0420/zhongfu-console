@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import {
   deductInventoryForFeeding,
   convertInventoryAmount,
+  normalizeOrder,
   loadState,
   parseBackup,
   restoreInventoryDeductions,
@@ -314,10 +315,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addOrder = useCallback((order: Omit<Order, 'id'>) => {
     const id = genId('o');
-    setState(prev => ({
-      ...prev,
-      orders: [...prev.orders, { ...order, id, catId: 'shared' }],
-    }));
+    setState(prev => {
+      const normalizeName = (value: string) => value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s\-_/·.,，。()（）]+/g, '');
+      const sameProduct = (candidate: Order) => normalizeName(candidate.itemName) === normalizeName(order.itemName)
+        && (!order.brand || !candidate.brand || normalizeName(candidate.brand) === normalizeName(order.brand))
+        && candidate.category === order.category
+        && candidate.unit === order.unit;
+      const historicalPack = prev.orders
+        .filter(candidate => sameProduct(candidate) && candidate.purchasePackSize && candidate.purchasePackSize > 1)
+        .sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate))[0];
+      const total = Number.isFinite(order.totalPrice) ? order.totalPrice ?? 0 : order.quantity * order.unitPrice;
+      const inferred = historicalPack && !order.purchaseUnit && !order.purchasePackSize
+        ? {
+            ...order,
+            purchaseUnit: historicalPack.purchaseUnit,
+            purchasePackSize: historicalPack.purchasePackSize,
+            purchaseQuantity: order.quantity / (historicalPack.purchasePackSize as number),
+            purchaseUnitPrice: total / (order.quantity / (historicalPack.purchasePackSize as number)),
+          }
+        : order;
+      const normalized = normalizeOrder({ ...inferred, id });
+      return {
+        ...prev,
+        orders: [...prev.orders, { ...normalized, catId: 'shared' }],
+      };
+    });
     return id;
   }, []);
 
@@ -348,7 +370,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           : order.status === 'durable'
             ? convertedBeforeDurable ?? convertedConsumed
             : convertedConsumed;
-        const next = {
+        const next = normalizeOrder({
           ...order,
           ...updates,
           quantity,
@@ -356,7 +378,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           consumed: Math.min(quantity, activeConsumed),
           consumedBeforeFinished: undefined,
           consumedBeforeDurable: undefined,
-        };
+        });
 
         if (nextStatus === 'finished') {
           return {

@@ -37,6 +37,13 @@ export interface Order {
   /** Optional smallest-unit conversion, for example 60g per bag or 20 tablets per box. */
   packageSize?: number;
   packageUnit?: string;
+  /** Purchase-facing unit and quantity, kept separate from the inventory base unit. */
+  purchaseUnit?: string;
+  purchaseQuantity?: number;
+  /** Number of inventory base units contained in one purchase unit. */
+  purchasePackSize?: number;
+  /** Price paid for one purchase unit (for example ¥98/盒). */
+  purchaseUnitPrice?: number;
   /** Compressed product/package photos. The first item is the cover image. */
   imageUrls?: string[];
   /** Legacy cover field retained for older clients and backups. */
@@ -67,6 +74,101 @@ export function orderTotalPrice(order: Order): number {
     return order.totalPrice ?? 0;
   }
   return order.quantity * order.unitPrice;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+/**
+ * Converts the legacy shape (quantity/unit represented the outer package) to
+ * the normalized shape (quantity/unit always represent inventory stock).
+ * This is intentionally idempotent so local storage, cloud sync and backups
+ * can all pass through the same migration safely.
+ */
+export function normalizeOrder(order: Order): Order {
+  const existingPurchaseUnit = order.purchaseUnit?.trim();
+  const existingPurchaseQuantity = positiveNumber(order.purchaseQuantity);
+  const existingPackSize = positiveNumber(order.purchasePackSize);
+  const packageCount = positiveNumber(order.packageCount);
+  const packageSize = positiveNumber(order.packageSize);
+  const conversion = order.packConversion;
+  const conversionInnerQuantity = positiveNumber(conversion?.innerQuantity);
+  const conversionWeight = positiveNumber(conversion?.weightPerInner);
+  const legacyInnerUnit = order.packageCountUnit?.trim() || conversion?.innerUnit?.trim();
+  const legacyPackageCount = packageCount ?? conversionInnerQuantity;
+  const legacyPackageSize = packageSize ?? conversionWeight;
+  const hasNormalizedShape = Boolean(existingPurchaseUnit && existingPurchaseQuantity && existingPackSize);
+  if (hasNormalizedShape) {
+    const purchaseQuantity = existingPurchaseQuantity as number;
+    const purchasePackSize = existingPackSize as number;
+    const total = orderTotalPrice(order);
+    return {
+      ...order,
+      purchaseUnit: existingPurchaseUnit,
+      purchaseQuantity,
+      purchasePackSize,
+      purchaseUnitPrice: positiveNumber(order.purchaseUnitPrice) ?? (purchaseQuantity > 0 ? total / purchaseQuantity : 0),
+      quantity: Number.isFinite(order.quantity) ? order.quantity : purchaseQuantity * purchasePackSize,
+      consumed: Number.isFinite(order.consumed) ? order.consumed : 0,
+    };
+  }
+
+  const outerQuantity = positiveNumber(order.quantity) ?? 1;
+  const purchaseUnit = existingPurchaseUnit || order.unit;
+  const purchaseQuantity = existingPurchaseQuantity ?? outerQuantity;
+  const derivedPackSize = existingPackSize ?? legacyPackageCount ?? (legacyPackageSize && order.packageUnit?.trim() ? legacyPackageSize : undefined) ?? 1;
+  const inventoryUnit = legacyPackageCount && legacyInnerUnit
+    ? legacyInnerUnit
+    : legacyPackageSize && order.packageUnit?.trim()
+      ? order.packageUnit.trim()
+      : order.unit;
+  const inventoryQuantity = existingPurchaseUnit
+    ? outerQuantity
+    : outerQuantity * derivedPackSize;
+  const conversionRatio = inventoryQuantity / outerQuantity;
+  const total = orderTotalPrice(order);
+  const scale = (value: number | undefined) => Number.isFinite(value) ? (value as number) * conversionRatio : value;
+  return {
+    ...order,
+    quantity: inventoryQuantity,
+    unit: inventoryUnit,
+    consumed: scale(order.consumed) ?? 0,
+    consumedBeforeFinished: scale(order.consumedBeforeFinished),
+    consumedBeforeDurable: scale(order.consumedBeforeDurable),
+    unitPrice: inventoryQuantity > 0 ? total / inventoryQuantity : 0,
+    totalPrice: total,
+    purchaseUnit,
+    purchaseQuantity,
+    purchasePackSize: derivedPackSize,
+    purchaseUnitPrice: purchaseQuantity > 0 ? total / purchaseQuantity : 0,
+    // These legacy fields described the old outer-package shape. Keep weight
+    // metadata when useful, but packageCount no longer participates in stock
+    // arithmetic after migration.
+    packageCount: undefined,
+    packageCountUnit: undefined,
+  };
+}
+
+export function orderPurchaseUnit(order: Order): string {
+  return order.purchaseUnit?.trim() || order.unit;
+}
+
+export function orderPurchaseQuantity(order: Order): number {
+  return positiveNumber(order.purchaseQuantity) ?? order.quantity;
+}
+
+export function orderPurchasePackSize(order: Order): number {
+  return positiveNumber(order.purchasePackSize) ?? 1;
+}
+
+export function orderPurchaseUnitPrice(order: Order): number {
+  const explicit = positiveNumber(order.purchaseUnitPrice);
+  if (explicit !== undefined) return explicit;
+  const total = orderTotalPrice(order);
+  const quantity = orderPurchaseQuantity(order);
+  return quantity > 0 ? total / quantity : 0;
 }
 
 function normalizeProductIdentity(value: string): string {
@@ -105,9 +207,9 @@ export function getPriceHistory(
   );
   const isComparableOrder = (order: Order) =>
     order.status !== 'cancelled'
-    && order.unitPrice > 0
+    && orderPurchaseUnitPrice(order) > 0
     && normalizeProductIdentity(order.itemName) === normalizedName
-    && normalizeProductIdentity(order.unit) === normalizedUnit
+    && normalizeProductIdentity(orderPurchaseUnit(order)) === normalizedUnit
     && packageSpecMatches(order);
   const comparableOrders = orders.filter(order => order.id !== options?.currentOrderId && isComparableOrder(order));
   const currentOrderIndex = options?.currentOrderId
@@ -118,8 +220,8 @@ export function getPriceHistory(
     : comparableOrders;
   if (previousOrders.length === 0) return null;
 
-  const lastUnitPrice = previousOrders[previousOrders.length - 1].unitPrice;
-  const lowestUnitPrice = Math.min(...comparableOrders.map(order => order.unitPrice));
+  const lastUnitPrice = orderPurchaseUnitPrice(previousOrders[previousOrders.length - 1]);
+  const lowestUnitPrice = Math.min(...comparableOrders.map(order => orderPurchaseUnitPrice(order)));
   return {
     lastUnitPrice,
     lowestUnitPrice,
@@ -222,6 +324,16 @@ export function convertInventoryAmount(value: number, fromUnit: string, toUnit: 
 export function convertUsageToInventoryAmount(order: Order, value: number, usageUnit: string): number | null {
   const direct = convertInventoryAmount(value, usageUnit, order.unit);
   if (direct !== null) return direct;
+  const purchasePackSize = orderPurchasePackSize(order);
+  if (order.packageSize && order.packageUnit) {
+    const inSmallestUnit = convertInventoryAmount(value, usageUnit, order.packageUnit);
+    if (inSmallestUnit !== null) return inSmallestUnit / order.packageSize;
+  }
+  const purchaseUnit = orderPurchaseUnit(order);
+  const inPurchaseUnits = convertInventoryAmount(value, usageUnit, purchaseUnit);
+  if (inPurchaseUnits !== null && purchasePackSize > 1) return inPurchaseUnits * purchasePackSize;
+
+  // Legacy fallback for records that have not passed through normalizeOrder.
   const hasInnerPackage = Number.isFinite(order.packageCount)
     && (order.packageCount ?? 0) > 0
     && Boolean(order.packageCountUnit?.trim());
@@ -239,6 +351,18 @@ export function convertUsageToInventoryAmount(order: Order, value: number, usage
 export function convertInventoryToUsageAmount(order: Order, value: number, usageUnit: string): number | null {
   const direct = convertInventoryAmount(value, order.unit, usageUnit);
   if (direct !== null) return direct;
+  const purchasePackSize = orderPurchasePackSize(order);
+  if (order.packageSize && order.packageUnit) {
+    const packageAmount = value * order.packageSize;
+    const converted = convertInventoryAmount(packageAmount, order.packageUnit, usageUnit);
+    if (converted !== null) return converted;
+  }
+  const purchaseUnit = orderPurchaseUnit(order);
+  const inPurchaseUnits = purchasePackSize > 0 ? value / purchasePackSize : value;
+  const convertedPurchase = convertInventoryAmount(inPurchaseUnits, purchaseUnit, usageUnit);
+  if (convertedPurchase !== null) return convertedPurchase;
+
+  // Legacy fallback for records that have not passed through normalizeOrder.
   const hasInnerPackage = Number.isFinite(order.packageCount)
     && (order.packageCount ?? 0) > 0
     && Boolean(order.packageCountUnit?.trim());
@@ -774,14 +898,14 @@ function migrateLegacyDemoData(state: AppState): AppState {
           ? order.imageUrl.trim()
           : '';
         const imageUrls = Array.from(new Set([...storedImages, legacyImage].filter(Boolean))).slice(0, 4);
-        return {
+        return normalizeOrder({
           ...order,
           catId: 'shared',
           brand: order.brand?.trim() || (moveLegacySupplierToBrand ? order.supplier?.trim() || undefined : undefined),
           supplier: moveLegacySupplierToBrand && !order.brand?.trim() && order.supplier?.trim() ? '' : order.supplier,
           imageUrls: imageUrls.length ? imageUrls : undefined,
           imageUrl: imageUrls[0] || undefined,
-        };
+        });
       }),
     feedingRecords: state.feedingRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),
     feedingPlans: state.feedingPlans.map(plan => ({ ...plan, catId: plan.catId || 'cat-zhongfu' })),
