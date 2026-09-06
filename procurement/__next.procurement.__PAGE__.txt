@@ -1,9 +1,9 @@
 1:"$Sreact.fragment"
 2:I[82933,[],"ClientPageRoot"]
-3:I[18353,["925","static/chunks/925-a9f28cf5f6595562.js","340","static/chunks/340-de5da89030af07c7.js","19","static/chunks/19-4f4a53d4a3298461.js","419","static/chunks/app/procurement/page-febf49fec38b926b.js"],"default"]
+3:I[18353,["925","static/chunks/925-a9f28cf5f6595562.js","340","static/chunks/340-de5da89030af07c7.js","19","static/chunks/19-4f4a53d4a3298461.js","419","static/chunks/app/procurement/page-8cfffce02dd5069b.js"],"default"]
 6:I[1605,[],"OutletBoundary"]
 7:"$Sreact.suspense"
-0:{"buildId":"Xz_2erbEwU24XdWDHIs6j","rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],null,["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"loading":null,"isPartial":false}
+0:{"buildId":"T7_BLErkV97_BMU1bNngb","rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],null,["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"loading":null,"isPartial":false}
 4:{}
 5:"$0:rsc:props:children:0:props:serverProvidedParams:params"
 8:null
