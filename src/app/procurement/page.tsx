@@ -15,7 +15,7 @@ import type { Expense } from '@/lib/store';
 import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, hasOtherAvailableInventory, inventoryProductKey, inventoryRemaining, normalizeConfiguredDailyUsage, orderPurchasePackSize, orderPurchaseQuantity, orderPurchaseUnit, orderPurchaseUnitPrice, orderTotalPrice } from '@/lib/store';
 import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Order, FeedingRecord } from '@/lib/store';
+import type { Order, FeedingRecord, ProductSpec } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
@@ -177,7 +177,7 @@ function getDailyUsage(order: Order, feedingRecords: FeedingRecord[]): number {
 }
 
 export default function ProcurementPage() {
-  const { state, addOrder, updateOrder, updateOrderStatus, updateOrderCategory, adjustOrderStock, deleteOrder, addExpense } = useAppContext();
+  const { state, addOrder, addProductSpec, updateProductSpec, deleteProductSpec, updateOrder, updateOrderStatus, updateOrderCategory, adjustOrderStock, deleteOrder, addExpense } = useAppContext();
   const catOrders = state.orders;
   const catFeedingRecords = state.feedingRecords;
   const [search, setSearch] = useState('');
@@ -187,6 +187,7 @@ export default function ProcurementPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [sortReady, setSortReady] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showSpecs, setShowSpecs] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState<{ order: Order; mode: 'consume' | 'restore' } | null>(null);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
@@ -429,13 +430,19 @@ export default function ProcurementPage() {
           <h1 className="text-2xl font-bold text-foreground">物资与采购</h1>
           <p className="text-sm text-muted-foreground mt-1">采购入库、日常领用、临期与补货在这里形成闭环</p>
         </div>
-        <Dialog open={showAdd} onOpenChange={setShowAdd}>
-          <DialogTrigger asChild>
-            <Button className="btn-press bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Plus className="w-4 h-4 mr-1.5" /> 新建采购
-            </Button>
-          </DialogTrigger>
-          {showAdd && <AddOrderDialog orders={catOrders} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setShowSpecs(true)}><Archive className="w-4 h-4 mr-1.5" />规格库</Button>
+          <Dialog open={showAdd} onOpenChange={setShowAdd}>
+            <DialogTrigger asChild>
+              <Button className="btn-press bg-primary hover:bg-primary/90 text-primary-foreground">
+                <Plus className="w-4 h-4 mr-1.5" /> 新建采购
+              </Button>
+            </DialogTrigger>
+          {showAdd && <AddOrderDialog orders={catOrders} specs={state.productSpecs || []} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
+          </Dialog>
+        </div>
+        <Dialog open={showSpecs} onOpenChange={setShowSpecs}>
+          {showSpecs && <SpecManagerDialog specs={state.productSpecs || []} onAdd={addProductSpec} onUpdate={updateProductSpec} onDelete={deleteProductSpec} onClose={() => setShowSpecs(false)} />}
         </Dialog>
       </div>
 
@@ -1504,6 +1511,50 @@ function applyProductAnalysis<T extends {
   };
 }
 
+function SpecManagerDialog({ specs, onAdd, onUpdate, onDelete, onClose }: {
+  specs: ProductSpec[];
+  onAdd: (spec: Omit<ProductSpec, 'id' | 'createdAt'>) => string;
+  onUpdate: (id: string, updates: Partial<Omit<ProductSpec, 'id' | 'createdAt'>>) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ brand: '', itemName: '', itemGroup: '', category: '猫粮', purchaseUnit: '', inventoryUnit: '', unitsPerPurchase: '', packageSize: '', packageUnit: '' });
+  const reset = () => { setEditingId(null); setForm({ brand: '', itemName: '', itemGroup: '', category: '猫粮', purchaseUnit: '', inventoryUnit: '', unitsPerPurchase: '', packageSize: '', packageUnit: '' }); };
+  const edit = (spec: ProductSpec) => {
+    setForm({ brand: spec.brand || '', itemName: spec.itemName, itemGroup: spec.itemGroup || '', category: spec.category, purchaseUnit: spec.purchaseUnit, inventoryUnit: spec.inventoryUnit, unitsPerPurchase: String(spec.unitsPerPurchase), packageSize: spec.packageSize ? String(spec.packageSize) : '', packageUnit: spec.packageUnit || '' });
+    setEditingId(spec.id);
+  };
+  const save = () => {
+    const units = Number(form.unitsPerPurchase);
+    if (!form.itemName.trim() || !form.purchaseUnit.trim() || !form.inventoryUnit.trim() || !Number.isFinite(units) || units <= 0) return;
+    const payload = { catId: 'shared', brand: form.brand.trim() || undefined, itemName: form.itemName.trim(), itemGroup: form.itemGroup.trim() || undefined, category: form.category, purchaseUnit: form.purchaseUnit.trim(), inventoryUnit: form.inventoryUnit.trim(), unitsPerPurchase: units, packageSize: form.packageSize ? Number(form.packageSize) : undefined, packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined };
+    if (editingId) onUpdate(editingId, payload);
+    else onAdd(payload);
+    reset();
+  };
+  return (
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[680px]">
+      <DialogHeader><DialogTitle>物品规格库</DialogTitle></DialogHeader>
+      <div className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <HistoryTextAutocomplete value={form.brand} values={specs.map(spec => spec.brand || '').filter(Boolean)} onChange={brand => setForm(current => ({ ...current, brand }))} placeholder="品牌，如：小灶猫饭" />
+          <Input value={form.itemName} onChange={event => setForm(current => ({ ...current, itemName: event.target.value }))} placeholder="物品名称，如：猫饭" />
+          <Input value={form.itemGroup} onChange={event => setForm(current => ({ ...current, itemGroup: event.target.value }))} placeholder="系列 / 大标题（可选）" />
+          <Select value={form.category} onValueChange={category => setForm(current => ({ ...current, category }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><InventoryCategoryOptions /></SelectContent></Select>
+          <HistoryTextAutocomplete value={form.purchaseUnit} values={specs.map(spec => spec.purchaseUnit)} onChange={purchaseUnit => setForm(current => ({ ...current, purchaseUnit }))} placeholder="标准采购单位，如：盒" />
+          <HistoryTextAutocomplete value={form.inventoryUnit} values={specs.map(spec => spec.inventoryUnit)} onChange={inventoryUnit => setForm(current => ({ ...current, inventoryUnit }))} placeholder="库存基本单位，如：杯" />
+          <Input type="number" min="0" step="any" value={form.unitsPerPurchase} onChange={event => setForm(current => ({ ...current, unitsPerPurchase: event.target.value }))} placeholder="每采购单位包含多少库存单位" />
+          <div className="grid grid-cols-2 gap-2"><Input type="number" min="0" step="any" value={form.packageSize} onChange={event => setForm(current => ({ ...current, packageSize: event.target.value }))} placeholder="每库存单位容量（可选）" /><HistoryTextAutocomplete value={form.packageUnit} values={['g', 'kg', 'ml', '片', '粒']} onChange={packageUnit => setForm(current => ({ ...current, packageUnit }))} placeholder="容量单位" /></div>
+        </div>
+        <div className="flex justify-end gap-2"><Button variant="outline" onClick={reset}>清空</Button><Button onClick={save}>{editingId ? '保存修改' : '添加规格'}</Button></div>
+        {specs.length > 0 && <div className="space-y-2 border-t pt-3"><p className="text-sm font-medium">已登记规格</p>{specs.map(spec => <div key={spec.id} className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2 text-sm"><span className="min-w-0 truncate">{[spec.brand, spec.itemName].filter(Boolean).join(' ')} · 1{spec.purchaseUnit}={spec.unitsPerPurchase}{spec.inventoryUnit}{spec.packageSize ? `（${spec.packageSize}${spec.packageUnit || ''}/个）` : ''}</span><span className="flex shrink-0 gap-1"><Button variant="ghost" size="sm" onClick={() => edit(spec)}>编辑</Button><Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete(spec.id)}>删除</Button></span></div>)}</div>}
+        <div className="flex justify-end"><Button variant="outline" onClick={onClose}>关闭</Button></div>
+      </div>
+    </DialogContent>
+  );
+}
+
 function EditOrderDialog({ order, orders, onClose, onSave }: {
   order: Order;
   orders: Order[];
@@ -1738,11 +1789,11 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   );
 }
 
-function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => string; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
+function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders: Order[]; specs: ProductSpec[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => string; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
   const [mode, setMode] = useState<'single' | 'mixed' | 'bundle'>('single');
   const [form, setForm] = useState({
     brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
-    bundleName: '', bundleQuantity: '1', bundleUnit: '盒',
+    bundleName: '', bundleQuantity: '1', bundleUnit: '盒', specId: '', inventoryQuantity: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit,
     packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '',
     imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
@@ -1828,6 +1879,7 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
     && mixedFlavors.length > 0
     && mixedFlavors.every(flavor => flavor.name.trim() && Number.isFinite(Number(flavor.quantity)) && Number(flavor.quantity) > 0)
   );
+  const selectedSpec = specs.find(spec => spec.id === form.specId);
 
   const handleSubmit = () => {
     if (mode === 'mixed') {
@@ -1943,17 +1995,28 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       return;
     }
     const packageValid = packageFieldsValid(form.packageCount, form.packageCountUnit, form.packageSize, form.packageUnit);
-    if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid) return;
+    const actualQuantityValid = !selectedSpec || form.inventoryQuantity === '' || (Number.isFinite(Number(form.inventoryQuantity)) && Number(form.inventoryQuantity) > 0);
+    if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid || !actualQuantityValid) return;
+    const specPackSize = selectedSpec?.unitsPerPurchase || (form.packageCount ? Number(form.packageCount) : form.packageSize ? Number(form.packageSize) : 1);
+    const specInventoryUnit = selectedSpec?.inventoryUnit || form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim() || '件');
+    const actualInventoryQuantity = selectedSpec && form.inventoryQuantity !== '' ? Number(form.inventoryQuantity) : quantity * specPackSize;
+    const purchaseQuantity = selectedSpec && form.inventoryQuantity !== '' ? actualInventoryQuantity / specPackSize : quantity;
+    const purchaseUnit = selectedSpec?.purchaseUnit || form.unit.trim() || '件';
     const relatedOrderId = onAdd({
       catId: 'shared',
+      productSpecId: selectedSpec?.id,
       brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
       category: form.category,
-      quantity,
-      unit: form.unit.trim() || '件',
-      unitPrice,
+      quantity: actualInventoryQuantity,
+      unit: specInventoryUnit,
+      unitPrice: actualInventoryQuantity > 0 ? totalPrice / actualInventoryQuantity : 0,
       totalPrice,
+      purchaseUnit,
+      purchaseQuantity,
+      purchasePackSize: specPackSize,
+      purchaseUnitPrice: purchaseQuantity > 0 ? totalPrice / purchaseQuantity : 0,
       purchaseDate: form.purchaseDate,
       status: 'pending',
       consumed: 0,
@@ -1961,8 +2024,8 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
       productionDate: form.productionDate || undefined,
       shelfLife: shelfLifeInDays(form.shelfLife, form.shelfLifeUnit),
       shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
-      packageCount: form.packageCount ? Number(form.packageCount) : undefined,
-      packageCountUnit: form.packageCount ? form.packageCountUnit.trim() || undefined : undefined,
+      packageCount: undefined,
+      packageCountUnit: undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
       imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
@@ -2292,6 +2355,48 @@ function AddOrderDialog({ orders, onClose, onAdd, addExpense }: { orders: Order[
           </>
         ) : (
           <>
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <Label>规格模板（可选）</Label>
+              <p className="mt-1 text-xs text-muted-foreground">先在“规格库”登记标准包装，之后整装和散装都能按同一单位比较。</p>
+            </div>
+            <Select value={form.specId || 'none'} onValueChange={value => {
+              const spec = specs.find(item => item.id === value);
+              if (!spec) {
+                setForm(current => ({ ...current, specId: '', inventoryQuantity: '' }));
+                return;
+              }
+              setForm(current => ({
+                ...current,
+                specId: spec.id,
+                brand: spec.brand || current.brand,
+                itemName: spec.itemName,
+                itemGroup: spec.itemGroup || current.itemGroup,
+                category: spec.category,
+                unit: spec.purchaseUnit,
+                packageCount: String(spec.unitsPerPurchase),
+                packageCountUnit: spec.inventoryUnit,
+                packageSize: spec.packageSize ? String(spec.packageSize) : '',
+                packageUnit: spec.packageUnit || '',
+                inventoryQuantity: '',
+              }));
+            }}>
+              <SelectTrigger className="w-[190px]"><SelectValue placeholder="选择规格" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不使用模板</SelectItem>
+                {specs.map(spec => <SelectItem key={spec.id} value={spec.id}>{[spec.brand, spec.itemName].filter(Boolean).join(' ') || spec.itemName} · 1{spec.purchaseUnit}={spec.unitsPerPurchase}{spec.inventoryUnit}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {selectedSpec && <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>本次实际入库数量（{selectedSpec.inventoryUnit}）</Label>
+              <Input type="number" min="0" step="any" value={form.inventoryQuantity} onChange={event => setForm(current => ({ ...current, inventoryQuantity: event.target.value }))} placeholder={`整${selectedSpec.purchaseUnit}可留空，散装填写${selectedSpec.inventoryUnit}数量`} />
+            </div>
+            <div className="flex items-end text-xs text-muted-foreground">留空时按采购数量 × 包装关系入库；填写后可直接登记散装数量。</div>
+          </div>}
+        </div>
         <ProductImageField
           imageUrls={form.imageUrls}
           onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}

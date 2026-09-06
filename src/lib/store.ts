@@ -3,6 +3,7 @@ import { localDateKey } from '@/lib/local-date';
 export interface Order {
   id: string;
   catId?: string;
+  productSpecId?: string;
   /** Product brand, kept separate from a series/group name. */
   brand?: string;
   itemName: string;
@@ -60,6 +61,21 @@ export interface Order {
     innerQuantity: number; // 每外层含内层数量，如 6
     weightPerInner?: number; // 每内层重量，如 60g
   };
+}
+
+export interface ProductSpec {
+  id: string;
+  catId?: string;
+  brand?: string;
+  itemName: string;
+  itemGroup?: string;
+  category: string;
+  purchaseUnit: string;
+  inventoryUnit: string;
+  unitsPerPurchase: number;
+  packageSize?: number;
+  packageUnit?: string;
+  createdAt: string;
 }
 
 export interface PriceHistory {
@@ -689,6 +705,7 @@ export interface AppState {
   cats: CatProfile[];
   activeCatId?: string;
   orders: Order[];
+  productSpecs: ProductSpec[];
   feedingRecords: FeedingRecord[];
   feedingPlans: FeedingPlan[];
   healthRecords: HealthRecord[];
@@ -697,7 +714,7 @@ export interface AppState {
 }
 
 const STORAGE_KEY = 'zhongfu-console-data';
-const CURRENT_DATA_VERSION = 2;
+const CURRENT_DATA_VERSION = 3;
 
 export interface AppBackup {
   app: 'zhongfu-console';
@@ -778,6 +795,7 @@ function initialAppState(): AppState {
     cats: defaultCats,
     activeCatId: 'cat-zhongfu',
     orders: defaultOrders,
+    productSpecs: [],
     feedingRecords: defaultFeedingRecords,
     feedingPlans: [],
     healthRecords: defaultHealthRecords,
@@ -860,6 +878,7 @@ export function parseBackup(raw: string): AppState {
     cats: Array.isArray(candidate.cats) ? candidate.cats as CatProfile[] : [],
     activeCatId: typeof candidate.activeCatId === 'string' ? candidate.activeCatId : undefined,
     orders: candidate.orders as Order[],
+    productSpecs: Array.isArray(candidate.productSpecs) ? candidate.productSpecs as ProductSpec[] : [],
     feedingRecords: candidate.feedingRecords as FeedingRecord[],
     feedingPlans: Array.isArray(candidate.feedingPlans) ? candidate.feedingPlans as FeedingPlan[] : [],
     healthRecords: candidate.healthRecords as HealthRecord[],
@@ -881,6 +900,48 @@ function migrateLegacyDemoData(state: AppState): AppState {
     ...existingCats,
     ...(existingCats.some(cat => cat.id === 'cat-qiyu' || cat.name === '七遇') ? [] : [defaultCats[1]]),
   ];
+  const migratedOrders = state.orders
+    .filter(order => !removedOrderIds.has(order.id))
+    .map(order => {
+      const storedImages = Array.isArray(order.imageUrls)
+        ? order.imageUrls.filter(image => typeof image === 'string' && Boolean(image.trim()))
+        : [];
+      const legacyImage = typeof order.imageUrl === 'string' && order.imageUrl.trim()
+        ? order.imageUrl.trim()
+        : '';
+      const imageUrls = Array.from(new Set([...storedImages, legacyImage].filter(Boolean))).slice(0, 4);
+      return normalizeOrder({
+        ...order,
+        catId: 'shared',
+        brand: order.brand?.trim() || (moveLegacySupplierToBrand ? order.supplier?.trim() || undefined : undefined),
+        supplier: moveLegacySupplierToBrand && !order.brand?.trim() && order.supplier?.trim() ? '' : order.supplier,
+        imageUrls: imageUrls.length ? imageUrls : undefined,
+        imageUrl: imageUrls[0] || undefined,
+      });
+    });
+  const specs = Array.isArray(state.productSpecs) ? state.productSpecs.filter(spec => spec && typeof spec.itemName === 'string') : [];
+  const specKeys = new Set(specs.map(spec => [spec.brand, spec.itemName, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|')));
+  migratedOrders.forEach(order => {
+    const spec = {
+      id: `spec-${order.id}`,
+      catId: 'shared',
+      brand: order.brand,
+      itemName: order.itemName,
+      itemGroup: order.itemGroup,
+      category: order.category,
+      purchaseUnit: orderPurchaseUnit(order),
+      inventoryUnit: order.unit,
+      unitsPerPurchase: orderPurchasePackSize(order),
+      packageSize: order.packageSize,
+      packageUnit: order.packageUnit,
+      createdAt: order.purchaseDate,
+    } satisfies ProductSpec;
+    const key = [spec.brand, spec.itemName, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|');
+    if (!specKeys.has(key)) {
+      specs.push(spec);
+      specKeys.add(key);
+    }
+  });
   return {
     ...state,
     dataVersion: CURRENT_DATA_VERSION,
@@ -888,25 +949,8 @@ function migrateLegacyDemoData(state: AppState): AppState {
     activeCatId: state.activeCatId && cats.some(cat => cat.id === state.activeCatId)
       ? state.activeCatId
       : cats[0]?.id,
-    orders: state.orders
-      .filter(order => !removedOrderIds.has(order.id))
-      .map(order => {
-        const storedImages = Array.isArray(order.imageUrls)
-          ? order.imageUrls.filter(image => typeof image === 'string' && Boolean(image.trim()))
-          : [];
-        const legacyImage = typeof order.imageUrl === 'string' && order.imageUrl.trim()
-          ? order.imageUrl.trim()
-          : '';
-        const imageUrls = Array.from(new Set([...storedImages, legacyImage].filter(Boolean))).slice(0, 4);
-        return normalizeOrder({
-          ...order,
-          catId: 'shared',
-          brand: order.brand?.trim() || (moveLegacySupplierToBrand ? order.supplier?.trim() || undefined : undefined),
-          supplier: moveLegacySupplierToBrand && !order.brand?.trim() && order.supplier?.trim() ? '' : order.supplier,
-          imageUrls: imageUrls.length ? imageUrls : undefined,
-          imageUrl: imageUrls[0] || undefined,
-        });
-      }),
+    orders: migratedOrders,
+    productSpecs: specs,
     feedingRecords: state.feedingRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),
     feedingPlans: state.feedingPlans.map(plan => ({ ...plan, catId: plan.catId || 'cat-zhongfu' })),
     healthRecords: state.healthRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),

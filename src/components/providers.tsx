@@ -12,6 +12,7 @@ import {
   saveState,
   type AppState,
   type Order,
+  type ProductSpec,
   type FeedingRecord,
   type FeedingPlan,
   type HealthRecord,
@@ -47,6 +48,9 @@ interface AppContextType {
   deleteCat: (id: string) => void;
   setActiveCat: (id: string) => void;
   addOrder: (order: Omit<Order, 'id'>) => string;
+  addProductSpec: (spec: Omit<ProductSpec, 'id' | 'createdAt'>) => string;
+  updateProductSpec: (id: string, updates: Partial<Omit<ProductSpec, 'id' | 'createdAt'>>) => void;
+  deleteProductSpec: (id: string) => void;
   updateOrder: (id: string, updates: Partial<Omit<Order, 'id'>>) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
   markOrderRepurchased: (id: string, date: string) => void;
@@ -90,6 +94,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cats: [],
     activeCatId: undefined,
     orders: [],
+    productSpecs: [],
     feedingRecords: [],
     feedingPlans: [],
     healthRecords: [],
@@ -341,6 +346,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
     });
     return id;
+  }, []);
+
+  const addProductSpec = useCallback((spec: Omit<ProductSpec, 'id' | 'createdAt'>) => {
+    const id = genId('spec');
+    const newSpec: ProductSpec = { ...spec, id, catId: 'shared', createdAt: new Date().toISOString() };
+    setState(prev => ({ ...prev, productSpecs: [...(prev.productSpecs || []), newSpec] }));
+    return id;
+  }, []);
+
+  const updateProductSpec = useCallback((id: string, updates: Partial<Omit<ProductSpec, 'id' | 'createdAt'>>) => {
+    setState(prev => ({ ...prev, productSpecs: (prev.productSpecs || []).map(spec => spec.id === id ? { ...spec, ...updates } : spec) }));
+  }, []);
+
+  const deleteProductSpec = useCallback((id: string) => {
+    setState(prev => ({ ...prev, productSpecs: (prev.productSpecs || []).filter(spec => spec.id !== id) }));
   }, []);
 
   const updateOrder = useCallback((id: string, updates: Partial<Omit<Order, 'id'>>) => {
@@ -667,7 +687,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (!loaded) return null;
 
   return (
-    <AppContext.Provider value={{ state, today, addCat, updateCat, deleteCat, setActiveCat, addOrder, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
+    <AppContext.Provider value={{ state, today, addCat, updateCat, deleteCat, setActiveCat, addOrder, addProductSpec, updateProductSpec, deleteProductSpec, updateOrder, updateOrderStatus, markOrderRepurchased, updateOrderCategory, adjustOrderStock, deleteOrder, addFeedingRecord, syncPlannedFeedingRecords, updateFeedingRecord, deleteFeedingRecord, toggleFeedingComplete, addFeedingPlan, updateFeedingPlan, deleteFeedingPlan, addHealthRecord, updateHealthRecord, deleteHealthRecord, addExpense, updateExpense, deleteExpense, addChatMessages, clearChatMessages, restoreState, syncInfo, createCloudSync, connectCloudSync, disconnectCloudSync, syncNow }}>
       {children}
     </AppContext.Provider>
   );
