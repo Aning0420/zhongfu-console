@@ -921,7 +921,7 @@ function migrateLegacyDemoData(state: AppState): AppState {
     });
   const specs = Array.isArray(state.productSpecs) ? state.productSpecs.filter(spec => spec && typeof spec.itemName === 'string') : [];
   const specKeys = new Set(specs.map(spec => [spec.brand, spec.itemName, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|')));
-  migratedOrders.forEach(order => {
+  if ((state.dataVersion ?? 1) < 3) migratedOrders.forEach(order => {
     const spec = {
       id: `spec-${order.id}`,
       catId: 'shared',
