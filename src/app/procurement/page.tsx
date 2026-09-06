@@ -12,8 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import Image from 'next/image';
 import type { Expense } from '@/lib/store';
-import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star, History } from 'lucide-react';
+import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, hasOtherAvailableInventory, inventoryProductKey, inventoryRemaining, normalizeConfiguredDailyUsage, orderTotalPrice } from '@/lib/store';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
@@ -194,6 +194,7 @@ export default function ProcurementPage() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState<{ order: Order; mode: 'consume' | 'restore' } | null>(null);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
+  const [expandedInventoryGroups, setExpandedInventoryGroups] = useState<Set<string>>(new Set());
   const ordersSectionRef = useRef<HTMLDivElement>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -274,7 +275,7 @@ export default function ProcurementPage() {
         const expiry = getExpiryInfo(o);
         const depletion = getDepletionInfo(o, catFeedingRecords);
         const stockRatio = o.quantity > 0 ? inventoryRemaining(o) / o.quantity : 0;
-        if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
+        if (statusFilter === 'low-stock' && !(o.status === 'delivered' && !o.repurchasedAt && !hasOtherAvailableInventory(o, catOrders) && (stockRatio <= 0.3 || (depletion && depletion.daysLeft <= 7)))) return false;
         if (statusFilter === 'expiring' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft >= 0 && expiry.daysLeft <= 7)) return false;
         if (statusFilter === 'expired' && !(['delivered', 'no-repurchase'].includes(o.status) && expiry && expiry.daysLeft < 0)) return false;
         if (statusFilter === 'in-progress' && !['pending', 'shipped'].includes(o.status)) return false;
@@ -295,6 +296,36 @@ export default function ProcurementPage() {
           || chineseCollator.compare(a.id, b.id);
       });
   }, [catOrders, catFeedingRecords, search, statusFilter, categoryFilter, sortField, sortDirection]);
+
+  const filteredOrderGroups = useMemo(() => {
+    const groups = new Map<string, Order[]>();
+    filteredOrders.forEach(order => {
+      const key = inventoryProductKey(order);
+      groups.set(key, [...(groups.get(key) || []), order]);
+    });
+    return groups;
+  }, [filteredOrders]);
+
+  const displayOrders = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Order[] = [];
+    filteredOrders.forEach(order => {
+      const key = inventoryProductKey(order);
+      if (seen.has(key)) return;
+      seen.add(key);
+      result.push(...(filteredOrderGroups.get(key) || [order]));
+    });
+    return result;
+  }, [filteredOrders, filteredOrderGroups]);
+
+  const toggleInventoryGroup = (key: string) => {
+    setExpandedInventoryGroups(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const purchaseBatchCovers = useMemo(() => {
     const covers = new Map<string, string>();
@@ -321,7 +352,7 @@ export default function ProcurementPage() {
   // Items needing repurchase within 7 days (based on consumption speed)
   const repurchaseItems = useMemo(() => {
     return catOrders
-      .filter(o => o.status === 'delivered' && !o.repurchasedAt)
+      .filter(o => o.status === 'delivered' && !o.repurchasedAt && !hasOtherAvailableInventory(o, catOrders))
       .map(order => {
         const info = getDepletionInfo(order, catFeedingRecords);
         if (!info) return null;
@@ -379,7 +410,7 @@ export default function ProcurementPage() {
     }, 0);
     const stockValue = regularStockValue + bundleStockValue;
     const lowStock = catOrders.filter(order => {
-      if (order.status !== 'delivered' || order.repurchasedAt) return false;
+      if (order.status !== 'delivered' || order.repurchasedAt || hasOtherAvailableInventory(order, catOrders)) return false;
       const ratio = order.quantity > 0 ? inventoryRemaining(order) / order.quantity : 0;
       const depletion = getDepletionInfo(order, catFeedingRecords);
       return ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7);
@@ -631,17 +662,35 @@ export default function ProcurementPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.map((order, visibleIndex) => {
+              {displayOrders.map((order, visibleIndex) => {
+                const productKey = inventoryProductKey(order);
+                const productGroup = filteredOrderGroups.get(productKey) || [order];
+                const groupIndex = productGroup.findIndex(item => item.id === order.id);
+                const hasBatchGroup = productGroup.length > 1;
+                const isGroupExpanded = expandedInventoryGroups.has(productKey);
+                const isGroupSummary = hasBatchGroup && !isGroupExpanded;
+                if (isGroupSummary && groupIndex > 0) return null;
                 const remaining = inventoryRemaining(order);
-                const ratio = order.quantity > 0 ? Math.max(0, remaining / order.quantity) : 0;
+                const groupedQuantity = productGroup.reduce((sum, item) => sum + item.quantity, 0);
+                const groupedRemaining = productGroup.reduce((sum, item) => sum + inventoryRemaining(item), 0);
+                const displayedQuantity = isGroupSummary ? groupedQuantity : order.quantity;
+                const displayedRemaining = isGroupSummary ? groupedRemaining : remaining;
+                const ratio = displayedQuantity > 0 ? Math.max(0, displayedRemaining / displayedQuantity) : 0;
                 const st = statusMap[order.status];
                 const expiry = getExpiryInfo(order);
                 const dailyUsage = getDailyUsage(order, catFeedingRecords);
-                const depletion = getDepletionInfo(order, catFeedingRecords);
-                const needsRestock = order.status === 'delivered' && !order.repurchasedAt
+                const groupedDailyUsage = isGroupSummary
+                  ? Math.max(...productGroup.map(item => getDailyUsage(item, catFeedingRecords)))
+                  : dailyUsage;
+                const depletion = isGroupSummary
+                  ? groupedDailyUsage > 0
+                    ? { daysLeft: Math.floor(displayedRemaining / groupedDailyUsage), depletionDate: addLocalDays(localDateKey(), Math.floor(displayedRemaining / groupedDailyUsage)), dailyUsage: groupedDailyUsage }
+                    : null
+                  : getDepletionInfo(order, catFeedingRecords);
+                const needsRestock = order.status === 'delivered' && !order.repurchasedAt && !hasOtherAvailableInventory(order, catOrders)
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
                 const showGroupHeading = Boolean(order.itemGroup);
-                const showBundlePrice = !order.purchaseBatchId || filteredOrders[visibleIndex - 1]?.purchaseBatchId !== order.purchaseBatchId;
+                const showBundlePrice = !order.purchaseBatchId || displayOrders[visibleIndex - 1]?.purchaseBatchId !== order.purchaseBatchId;
                 const coverImage = order.imageUrls?.[0] || order.imageUrl || (order.purchaseBatchId ? purchaseBatchCovers.get(order.purchaseBatchId) : undefined);
                 const priceHistory = getPriceHistory(
                   order.itemName,
@@ -667,6 +716,17 @@ export default function ProcurementPage() {
                         ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
                         <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
+                      {hasBatchGroup && (
+                        <button
+                          type="button"
+                          onClick={() => toggleInventoryGroup(productKey)}
+                          className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10"
+                          title={isGroupSummary ? '展开查看各采购批次' : '收起采购批次'}
+                        >
+                          {isGroupSummary ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                          {isGroupSummary ? `共${productGroup.length}个批次` : '收起批次'}
+                        </button>
+                      )}
                       {(order.productBenefits || order.suitableLifeStages || order.feedingGuidance) && (
                         <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground" title={order.productBenefits || order.feedingGuidance}>
                           {order.productBenefits || order.feedingGuidance}
@@ -691,7 +751,7 @@ export default function ProcurementPage() {
                           />
                         </div>
                         <span className={cn('text-xs', ratio < 0.3 ? 'text-accent font-medium' : 'text-muted-foreground')}>
-                          {remaining}{order.unit}
+                          {displayedRemaining}{order.unit}
                         </span>
                       </div>
                       {packageConversionLabel(order) && (
@@ -699,10 +759,12 @@ export default function ProcurementPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {formatInventoryDailyUsage(dailyUsage, order.unit)}
+                      {formatInventoryDailyUsage(groupedDailyUsage, order.unit)}
                     </td>
                     <td className="px-4 py-3 text-foreground">
-                      {bundlePriceLabel(order) && showBundlePrice ? (
+                      {isGroupSummary ? (
+                        <span className="text-xs text-muted-foreground">多批次价格</span>
+                      ) : bundlePriceLabel(order) && showBundlePrice ? (
                         <>
                           <div className="max-w-[220px] text-xs font-medium leading-5">整盒采购</div>
                           <div className="max-w-[220px] text-xs leading-5 text-muted-foreground" title={bundlePriceLabel(order) || undefined}>{bundlePriceLabel(order)}</div>
@@ -717,8 +779,8 @@ export default function ProcurementPage() {
                         </>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{order.supplier}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{order.purchaseDate}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{isGroupSummary ? `共${productGroup.length}个批次` : order.supplier}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{isGroupSummary ? '多批次' : order.purchaseDate}</td>
                     <td className="px-4 py-3 text-muted-foreground">{order.productionDate || '-'}</td>
                     <td className="px-4 py-3">
                       {order.shelfLife ? (
@@ -747,7 +809,9 @@ export default function ProcurementPage() {
                         ) : <span className="text-muted-foreground text-xs">-</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <Select value={order.status} onValueChange={status => updateOrderStatus(order.id, status as Order['status'])}>
+                      {isGroupSummary ? (
+                        <span className="text-xs text-muted-foreground">多批次</span>
+                      ) : <Select value={order.status} onValueChange={status => updateOrderStatus(order.id, status as Order['status'])}>
                         <SelectTrigger size="sm" className={cn('w-[144px] border-0 shadow-none', st.color)} aria-label={`修改${order.itemName}的状态`}>
                           <st.icon className="h-3.5 w-3.5 shrink-0" />
                           <SelectValue />
@@ -757,10 +821,14 @@ export default function ProcurementPage() {
                             <SelectItem key={value} value={value}>{status.label}</SelectItem>
                           ))}
                         </SelectContent>
-                      </Select>
+                      </Select>}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex min-w-[246px] items-center gap-1.5">
+                      {isGroupSummary ? (
+                        <Button variant="outline" size="sm" onClick={() => toggleInventoryGroup(productKey)} className="h-8 text-xs">
+                          <ChevronDown className="h-3.5 w-3.5" />查看批次
+                        </Button>
+                      ) : <div className="flex min-w-[246px] items-center gap-1.5">
                         <Select
                           value=""
                           onValueChange={mode => setStockAdjustment({ order, mode: mode as 'consume' | 'restore' })}
@@ -788,7 +856,7 @@ export default function ProcurementPage() {
                         <Button variant="ghost" size="icon-sm" onClick={() => { if (confirm('确定删除该订单？')) deleteOrder(order.id); }} className="text-destructive" title="删除采购记录" aria-label={`删除${order.itemName}`}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                      </div>
+                      </div>}
                     </td>
                   </tr>
                 );

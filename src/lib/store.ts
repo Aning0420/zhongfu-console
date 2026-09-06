@@ -291,6 +291,34 @@ export function inventoryRemaining(order: Order): number {
   return roundInventory(Math.max(0, order.quantity - order.consumed));
 }
 
+/**
+ * Identity used when deciding whether separate purchase batches are the same
+ * interchangeable stock. Purchase-batch metadata and prices are intentionally
+ * excluded so a newer batch can cover an older batch's restock reminder.
+ */
+export function inventoryProductKey(order: Order): string {
+  return [
+    order.brand,
+    order.itemName,
+    order.category,
+    order.unit,
+    order.packageCount,
+    order.packageCountUnit,
+    order.packageSize,
+    order.packageUnit,
+  ].map(value => normalizeProductIdentity(String(value ?? ''))).join('|');
+}
+
+export function hasOtherAvailableInventory(order: Order, orders: Order[]): boolean {
+  const key = inventoryProductKey(order);
+  return orders.some(candidate =>
+    candidate.id !== order.id
+    && ['delivered', 'no-repurchase'].includes(candidate.status)
+    && inventoryRemaining(candidate) > 0
+    && inventoryProductKey(candidate) === key
+  );
+}
+
 export function deductInventoryForFeeding(record: FeedingRecord, orders: Order[]): {
   orders: Order[];
   deductions: InventoryDeduction[];

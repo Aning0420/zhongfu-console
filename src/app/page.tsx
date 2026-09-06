@@ -24,7 +24,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, inventoryRemaining, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
+import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, hasOtherAvailableInventory, inventoryRemaining, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
 import { CatNameBadge } from '@/components/cat-record-select';
 
@@ -71,7 +71,7 @@ export default function DashboardPage() {
 
     // Repurchase items (depletion within 7 days)
     const repurchaseItems = catOrders
-      .filter(o => o.status === 'delivered' && !o.repurchasedAt)
+      .filter(o => o.status === 'delivered' && !o.repurchasedAt && !hasOtherAvailableInventory(o, catOrders))
       .map(order => {
         const remaining = inventoryRemaining(order);
         const observedUsage = calcDailyUsage(order.itemName, catFeedingRecords, order.unit, order);
