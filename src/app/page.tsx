@@ -22,6 +22,7 @@ import {
   Utensils,
   Activity,
   Bell,
+  BellOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calcDailyUsage, conciseFeedingNote, formatInventoryDailyUsage, hasOtherAvailableInventory, inventoryRemaining, normalizeConfiguredDailyUsage, type FeedingRecord, type Order } from '@/lib/store';
@@ -29,7 +30,7 @@ import { addLocalDays, localDateKey } from '@/lib/local-date';
 import { CatNameBadge } from '@/components/cat-record-select';
 
 export default function DashboardPage() {
-  const { state, today, updateFeedingRecord, toggleFeedingComplete } = useAppContext();
+  const { state, today, updateFeedingRecord, toggleFeedingComplete, updateOrderStatus } = useAppContext();
   const catOrders = state.orders;
   const catFeedingRecords = state.feedingRecords;
   const catHealthRecords = state.healthRecords;
@@ -339,6 +340,14 @@ export default function DashboardPage() {
                   </span>
                   <Button variant="outline" size="sm" onClick={() => setRepurchaseOrder(item.order)} className="h-7 text-xs">
                     <ShoppingCart className="h-3.5 w-3.5" />已回购
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => updateOrderStatus(item.order.id, 'no-repurchase')}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <BellOff className="h-3.5 w-3.5" />不回购
                   </Button>
                 </div>
               </div>

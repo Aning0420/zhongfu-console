@@ -496,6 +496,14 @@ export default function ProcurementPage() {
                   <Button variant="outline" size="sm" onClick={() => setRepurchaseOrder(order)} className="h-7 text-xs">
                     <ShoppingCart className="h-3.5 w-3.5" />已回购
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => updateOrderStatus(order.id, 'no-repurchase')}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <BellOff className="h-3.5 w-3.5" />不回购
+                  </Button>
                 </div>
               </div>
             ))}
