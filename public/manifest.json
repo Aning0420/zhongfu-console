@@ -15,16 +15,28 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "zhongfu-cat-app-icon-192.png",
+      "src": "./zhongfu-cat-app-icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "zhongfu-cat-app-icon.png",
+      "src": "./zhongfu-cat-app-icon.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "./zhongfu-cat-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./zhongfu-cat-app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
@@ -32,19 +44,19 @@
       "name": "记录喂食",
       "short_name": "喂食",
       "url": "feeding/",
-      "icons": [{ "src": "zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [{ "src": "./zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "健康管理",
       "short_name": "健康",
       "url": "health/",
-      "icons": [{ "src": "zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [{ "src": "./zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "快速记账",
       "short_name": "支出",
       "url": "expenses/",
-      "icons": [{ "src": "zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [{ "src": "./zhongfu-cat-app-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }
