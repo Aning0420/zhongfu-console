@@ -1804,14 +1804,53 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
-    { id: 'bundle_2', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_1', specId: '', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', specId: '', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
   ]);
   const [mixedFlavors, setMixedFlavors] = useState([
-    { id: 'flavor_1', name: '', quantity: '' },
-    { id: 'flavor_2', name: '', quantity: '' },
+    { id: 'flavor_1', specId: '', name: '', quantity: '' },
+    { id: 'flavor_2', specId: '', name: '', quantity: '' },
   ]);
   const [specNotice, setSpecNotice] = useState('');
+  const applySpecToBundleItem = (itemId: string, specId: string) => {
+    const spec = specs.find(item => item.id === specId);
+    if (!spec) {
+      setBundleItems(current => current.map(item => item.id === itemId ? { ...item, specId: '' } : item));
+      return;
+    }
+    setBundleItems(current => current.map(item => item.id === itemId ? {
+      ...item,
+      specId: spec.id,
+      brand: spec.brand || item.brand,
+      itemName: spec.itemName,
+      itemGroup: spec.itemGroup || item.itemGroup,
+      category: spec.category,
+      quantity: String(spec.unitsPerPurchase),
+      unit: spec.inventoryUnit,
+      packageCount: String(spec.unitsPerPurchase),
+      packageCountUnit: spec.inventoryUnit,
+      packageSize: spec.packageSize ? String(spec.packageSize) : '',
+      packageUnit: spec.packageUnit || '',
+    } : item));
+  };
+  const applySpecToMixedFlavor = (flavorId: string, specId: string) => {
+    const spec = specs.find(item => item.id === specId);
+    if (!spec) {
+      setMixedFlavors(current => current.map(flavor => flavor.id === flavorId ? { ...flavor, specId: '' } : flavor));
+      return;
+    }
+    setMixedFlavors(current => current.map(flavor => flavor.id === flavorId ? { ...flavor, specId: spec.id, name: spec.itemName } : flavor));
+    setForm(current => ({
+      ...current,
+      brand: current.brand || spec.brand || '',
+      bundleName: current.bundleName || spec.itemGroup || '',
+      category: spec.category,
+      bundleUnit: current.bundleUnit || spec.purchaseUnit,
+      unit: spec.inventoryUnit,
+      packageSize: spec.packageSize ? String(spec.packageSize) : current.packageSize,
+      packageUnit: spec.packageUnit || current.packageUnit,
+    }));
+  };
   const applyHistoryTemplate = (template: Order) => {
     const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
     setForm(current => ({
@@ -1934,6 +1973,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       const bundleName = form.bundleName.trim();
       const relatedOrderIds = mixedFlavors.map((flavor, index) => onAdd({
         catId: 'shared',
+        productSpecId: flavor.specId || undefined,
         brand: form.brand.trim() || undefined,
         itemName: flavor.name.trim(),
         itemGroup: bundleName,
@@ -1985,6 +2025,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
         const allocatedPrice = item.allocatedPrice === '' ? 0 : Number(item.allocatedPrice);
         return onAdd({
           catId: 'shared',
+          productSpecId: item.specId || undefined,
           brand: item.brand.trim() || undefined,
           itemName: item.itemName.trim(),
           itemGroup: item.itemGroup.trim() || bundleName || undefined,
@@ -2169,6 +2210,16 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                       </Button>
                     )}
                   </div>
+                  <div className="mb-2 flex items-center gap-2">
+                    <Label className="shrink-0 text-xs text-muted-foreground">历史规格</Label>
+                    <Select value={item.specId || 'none'} onValueChange={specId => applySpecToBundleItem(item.id, specId)}>
+                      <SelectTrigger className="h-8 flex-1"><SelectValue placeholder="选择规格后自动带出单位和包装换算" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">不使用历史规格</SelectItem>
+                        {specs.map(spec => <SelectItem key={spec.id} value={spec.id}>{[spec.brand, spec.itemName].filter(Boolean).join(' ') || spec.itemName} · 1{spec.purchaseUnit}={spec.unitsPerPurchase}{spec.inventoryUnit}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <HistoryTextAutocomplete value={item.brand} values={recentOrderValues(orders, order => order.brand)} onChange={brand => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, brand } : entry))} placeholder="品牌，如：麦德氏" />
                     <HistoryItemAutocomplete
@@ -2228,7 +2279,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, brand: '', itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, specId: '', brand: '', itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -2353,7 +2404,16 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
               {mixedFlavors.map((flavor, index) => (
                 <div key={flavor.id} className="grid grid-cols-[minmax(0,1fr)_92px_36px] items-end gap-2 rounded-lg border border-border/70 p-2.5">
                   <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">口味 {index + 1}</Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs text-muted-foreground">口味 {index + 1}</Label>
+                      <Select value={flavor.specId || 'none'} onValueChange={specId => applySpecToMixedFlavor(flavor.id, specId)}>
+                        <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue placeholder="选择历史规格" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">不使用历史规格</SelectItem>
+                          {specs.map(spec => <SelectItem key={spec.id} value={spec.id}>{[spec.brand, spec.itemName].filter(Boolean).join(' ') || spec.itemName} · {spec.inventoryUnit}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <HistoryTextAutocomplete
                       value={flavor.name}
                       values={recentOrderValues(orders, item => item.itemName)}
@@ -2382,7 +2442,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setMixedFlavors(current => [...current, { id: `flavor_${Date.now()}_${current.length}`, name: '', quantity: '' }])}
+                onClick={() => setMixedFlavors(current => [...current, { id: `flavor_${Date.now()}_${current.length}`, specId: '', name: '', quantity: '' }])}
                 className="w-full"
               >
                 <Plus className="h-3.5 w-3.5" />添加口味

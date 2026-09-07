@@ -714,7 +714,7 @@ export interface AppState {
 }
 
 const STORAGE_KEY = 'zhongfu-console-data';
-const CURRENT_DATA_VERSION = 3;
+const CURRENT_DATA_VERSION = 4;
 
 export interface AppBackup {
   app: 'zhongfu-console';
@@ -950,7 +950,9 @@ function migrateLegacyDemoData(state: AppState): AppState {
       ? state.activeCatId
       : cats[0]?.id,
     orders: migratedOrders,
-    productSpecs: specs,
+    // The user is re-registering specifications from scratch. This one-time
+    // migration clears only reusable templates and leaves all purchase data intact.
+    productSpecs: (state.dataVersion ?? 1) < 4 ? [] : specs,
     feedingRecords: state.feedingRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),
     feedingPlans: state.feedingPlans.map(plan => ({ ...plan, catId: plan.catId || 'cat-zhongfu' })),
     healthRecords: state.healthRecords.map(record => ({ ...record, catId: record.catId || 'cat-zhongfu' })),
