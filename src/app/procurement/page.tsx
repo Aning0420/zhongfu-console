@@ -187,7 +187,6 @@ export default function ProcurementPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [sortReady, setSortReady] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [showSpecs, setShowSpecs] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState<{ order: Order; mode: 'consume' | 'restore' } | null>(null);
   const [repurchaseOrder, setRepurchaseOrder] = useState<Order | null>(null);
@@ -431,19 +430,15 @@ export default function ProcurementPage() {
           <p className="text-sm text-muted-foreground mt-1">采购入库、日常领用、临期与补货在这里形成闭环</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setShowSpecs(true)}><Archive className="w-4 h-4 mr-1.5" />规格库</Button>
           <Dialog open={showAdd} onOpenChange={setShowAdd}>
             <DialogTrigger asChild>
               <Button className="btn-press bg-primary hover:bg-primary/90 text-primary-foreground">
                 <Plus className="w-4 h-4 mr-1.5" /> 新建采购
               </Button>
             </DialogTrigger>
-          {showAdd && <AddOrderDialog orders={catOrders} specs={state.productSpecs || []} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
+          {showAdd && <AddOrderDialog orders={catOrders} specs={state.productSpecs || []} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} onAddSpec={addProductSpec} onUpdateSpec={updateProductSpec} onDeleteSpec={deleteProductSpec} />}
           </Dialog>
         </div>
-        <Dialog open={showSpecs} onOpenChange={setShowSpecs}>
-          {showSpecs && <SpecManagerDialog specs={state.productSpecs || []} onAdd={addProductSpec} onUpdate={updateProductSpec} onDelete={deleteProductSpec} onClose={() => setShowSpecs(false)} />}
-        </Dialog>
       </div>
 
       {/* Expiry Reminder */}
@@ -1789,7 +1784,16 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   );
 }
 
-function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders: Order[]; specs: ProductSpec[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => string; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
+function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, onUpdateSpec, onDeleteSpec }: {
+  orders: Order[];
+  specs: ProductSpec[];
+  onClose: () => void;
+  onAdd: (order: Omit<Order, 'id'>) => string;
+  addExpense: (expense: Omit<Expense, 'id'>) => void;
+  onAddSpec: (spec: Omit<ProductSpec, 'id' | 'createdAt'>) => string;
+  onUpdateSpec: (id: string, updates: Partial<Omit<ProductSpec, 'id' | 'createdAt'>>) => void;
+  onDeleteSpec: (id: string) => void;
+}) {
   const [mode, setMode] = useState<'single' | 'mixed' | 'bundle'>('single');
   const [form, setForm] = useState({
     brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
@@ -1807,6 +1811,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders:
     { id: 'flavor_1', name: '', quantity: '' },
     { id: 'flavor_2', name: '', quantity: '' },
   ]);
+  const [specNotice, setSpecNotice] = useState('');
   const applyHistoryTemplate = (template: Order) => {
     const shelfLife = shelfLifeForEditing(template.shelfLife, template.shelfLifeUnit);
     setForm(current => ({
@@ -1880,6 +1885,47 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders:
     && mixedFlavors.every(flavor => flavor.name.trim() && Number.isFinite(Number(flavor.quantity)) && Number(flavor.quantity) > 0)
   );
   const selectedSpec = specs.find(spec => spec.id === form.specId);
+  const specUnitsPerPurchase = form.packageCount.trim() ? Number(form.packageCount) : 1;
+  const specInventoryUnit = form.packageCountUnit.trim()
+    || (form.packageSize.trim() && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim());
+  const specFormValid = Boolean(
+    form.itemName.trim()
+    && form.unit.trim()
+    && specInventoryUnit
+    && Number.isFinite(specUnitsPerPurchase)
+    && specUnitsPerPurchase > 0,
+  );
+
+  const saveCurrentSpec = () => {
+    if (!specFormValid) return;
+    const payload = {
+      catId: 'shared',
+      brand: form.brand.trim() || undefined,
+      itemName: form.itemName.trim(),
+      itemGroup: form.itemGroup.trim() || undefined,
+      category: form.category,
+      purchaseUnit: form.unit.trim(),
+      inventoryUnit: specInventoryUnit,
+      unitsPerPurchase: specUnitsPerPurchase,
+      packageSize: form.packageSize.trim() ? Number(form.packageSize) : undefined,
+      packageUnit: form.packageSize.trim() && form.packageUnit.trim() ? form.packageUnit.trim() : undefined,
+    };
+    if (selectedSpec) {
+      onUpdateSpec(selectedSpec.id, payload);
+      setSpecNotice('规格已更新，后续采购可直接选择。');
+    } else {
+      const id = onAddSpec(payload);
+      setForm(current => ({ ...current, specId: id }));
+      setSpecNotice('规格已保存，后续采购可直接选择。');
+    }
+  };
+
+  const removeSelectedSpec = () => {
+    if (!selectedSpec || !window.confirm(`确定删除“${selectedSpec.itemName}”的规格模板吗？已有采购记录不会受影响。`)) return;
+    onDeleteSpec(selectedSpec.id);
+    setForm(current => ({ ...current, specId: '', inventoryQuantity: '' }));
+    setSpecNotice('规格模板已删除。');
+  };
 
   const handleSubmit = () => {
     if (mode === 'mixed') {
@@ -1997,11 +2043,11 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders:
     const packageValid = packageFieldsValid(form.packageCount, form.packageCountUnit, form.packageSize, form.packageUnit);
     const actualQuantityValid = !selectedSpec || form.inventoryQuantity === '' || (Number.isFinite(Number(form.inventoryQuantity)) && Number(form.inventoryQuantity) > 0);
     if (!form.itemName.trim() || !form.totalPrice || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(totalPrice) || totalPrice < 0 || !packageValid || !actualQuantityValid) return;
-    const specPackSize = selectedSpec?.unitsPerPurchase || (form.packageCount ? Number(form.packageCount) : form.packageSize ? Number(form.packageSize) : 1);
-    const specInventoryUnit = selectedSpec?.inventoryUnit || form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim() || '件');
+    const specPackSize = form.packageCount ? Number(form.packageCount) : (selectedSpec?.unitsPerPurchase || (form.packageSize ? Number(form.packageSize) : 1));
+    const specInventoryUnit = form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : selectedSpec?.inventoryUnit || form.unit.trim() || '件');
     const actualInventoryQuantity = selectedSpec && form.inventoryQuantity !== '' ? Number(form.inventoryQuantity) : quantity * specPackSize;
     const purchaseQuantity = selectedSpec && form.inventoryQuantity !== '' ? actualInventoryQuantity / specPackSize : quantity;
-    const purchaseUnit = selectedSpec?.purchaseUnit || form.unit.trim() || '件';
+    const purchaseUnit = form.unit.trim() || selectedSpec?.purchaseUnit || '件';
     const relatedOrderId = onAdd({
       catId: 'shared',
       productSpecId: selectedSpec?.id,
@@ -2358,8 +2404,8 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders:
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <Label>规格模板（可选）</Label>
-              <p className="mt-1 text-xs text-muted-foreground">先在“规格库”登记标准包装，之后整装和散装都能按同一单位比较。</p>
+              <Label>物品规格（可选）</Label>
+              <p className="mt-1 text-xs text-muted-foreground">规格和采购信息在这里一起填写；保存后下次可直接联想使用。</p>
             </div>
             <Select value={form.specId || 'none'} onValueChange={value => {
               const spec = specs.find(item => item.id === value);
@@ -2382,12 +2428,19 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders:
                 inventoryQuantity: '',
               }));
             }}>
-              <SelectTrigger className="w-[190px]"><SelectValue placeholder="选择规格" /></SelectTrigger>
+              <SelectTrigger className="w-[210px]"><SelectValue placeholder="选择历史规格" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">不使用模板</SelectItem>
+                <SelectItem value="none">新建规格 / 不使用历史规格</SelectItem>
                 {specs.map(spec => <SelectItem key={spec.id} value={spec.id}>{[spec.brand, spec.itemName].filter(Boolean).join(' ') || spec.itemName} · 1{spec.purchaseUnit}={spec.unitsPerPurchase}{spec.inventoryUnit}</SelectItem>)}
               </SelectContent>
             </Select>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={saveCurrentSpec} disabled={!specFormValid}>
+              {selectedSpec ? '更新当前规格' : '保存为新规格'}
+            </Button>
+            {selectedSpec && <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={removeSelectedSpec}>删除规格</Button>}
+            {specNotice && <span className="text-xs text-muted-foreground">{specNotice}</span>}
           </div>
           {selectedSpec && <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
