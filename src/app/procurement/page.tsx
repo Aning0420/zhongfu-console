@@ -10,16 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import Image from 'next/image';
 import type { Expense } from '@/lib/store';
 import { calcDailyUsage, convertInventoryToUsageAmount, convertUsageToInventoryAmount, formatInventoryDailyUsage, getPriceHistory, hasOtherAvailableInventory, inventoryProductKey, inventoryRemaining, normalizeConfiguredDailyUsage, orderPurchasePackSize, orderPurchaseQuantity, orderPurchaseUnit, orderPurchaseUnitPrice, orderTotalPrice } from '@/lib/store';
-import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Pencil, Trash2, Archive, BellOff, ImagePlus, Loader2, WandSparkles, Utensils, Star, History } from 'lucide-react';
+import { Plus, Search, ShoppingCart, Package, PackageCheck, Truck, CheckCircle2, XCircle, Filter, Clock, AlertTriangle, Calendar, TrendingDown, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Pencil, Trash2, Archive, BellOff, Utensils, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Order, FeedingRecord, ProductSpec } from '@/lib/store';
 import { InventoryCategoryOptions } from '@/components/inventory-category-options';
 import { RepurchaseDialog } from '@/components/repurchase-dialog';
 import { addLocalDays, localDateKey } from '@/lib/local-date';
-import { analyzeProductImages, compressProductImage, type ProductImageAnalysis } from '@/lib/product-image';
 
 const statusMap: Record<Order['status'], { label: string; icon: React.ElementType; color: string }> = {
   pending: { label: '待发货', icon: Clock, color: 'text-accent bg-accent/10' },
@@ -68,12 +66,6 @@ function shelfLifeForEditing(days?: number, preferredUnit?: ShelfLifeUnit): { va
   if (days % 365 === 0) return { value: String(days / 365), unit: 'year' };
   if (days % 30 === 0) return { value: String(days / 30), unit: 'month' };
   return { value: String(days), unit: 'day' };
-}
-
-function formatShelfLife(order: Order): string {
-  const display = shelfLifeForEditing(order.shelfLife, order.shelfLifeUnit);
-  const label = display.unit === 'year' ? '年' : display.unit === 'month' ? '个月' : '天';
-  return display.value ? `${display.value}${label}` : '-';
 }
 
 function productDisplayName(order: Order): string {
@@ -322,16 +314,6 @@ export default function ProcurementPage() {
       return next;
     });
   };
-
-  const purchaseBatchCovers = useMemo(() => {
-    const covers = new Map<string, string>();
-    catOrders.forEach(order => {
-      if (!order.purchaseBatchId || covers.has(order.purchaseBatchId)) return;
-      const cover = order.imageUrls?.[0] || order.imageUrl;
-      if (cover) covers.set(order.purchaseBatchId, cover);
-    });
-    return covers;
-  }, [catOrders]);
 
   // Items expiring within 7 days
   const expiringItems = useMemo(() => {
@@ -660,8 +642,7 @@ export default function ProcurementPage() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">单价</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">供应商</th>
                 <SortableHeader field="purchaseDate" label="采购时间" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">生产日期</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">保质期</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">过期日期</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">预计耗尽</th>
                 <SortableHeader field="status" label="状态" activeField={sortField} direction={sortDirection} onSort={changeSortField} />
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">操作</th>
@@ -697,7 +678,6 @@ export default function ProcurementPage() {
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
                 const showGroupHeading = Boolean(order.itemGroup);
                 const showBundlePrice = !order.purchaseBatchId || displayOrders[visibleIndex - 1]?.purchaseBatchId !== order.purchaseBatchId;
-                const coverImage = order.imageUrls?.[0] || order.imageUrl || (order.purchaseBatchId ? purchaseBatchCovers.get(order.purchaseBatchId) : undefined);
                 const priceHistory = getPriceHistory(
                   order.itemName,
                   orderPurchaseUnit(order),
@@ -711,9 +691,7 @@ export default function ProcurementPage() {
                       {order.brand && <div className="mb-0.5 text-xs font-semibold text-foreground" title={order.brand}>{order.brand}</div>}
                       {showGroupHeading && <div className="mb-1 text-xs font-semibold text-primary" title={order.itemGroup}>{order.itemGroup}</div>}
                       <div className={cn('flex items-center gap-2', (order.brand || order.itemGroup) && 'pl-2')}>
-                        {coverImage ? (
-                          <Image src={coverImage} alt="" width={32} height={32} unoptimized className="h-8 w-8 shrink-0 rounded border border-border object-cover" />
-                        ) : <Package className="w-4 h-4 text-muted-foreground shrink-0" />}
+                        <Package className="w-4 h-4 text-muted-foreground shrink-0" />
                         <span className="line-clamp-2 break-words font-medium leading-5 text-foreground" title={order.itemName}>{order.itemName}</span>
                       </div>
                       {hasBatchGroup && (
@@ -727,9 +705,10 @@ export default function ProcurementPage() {
                           {isGroupSummary ? `共${productGroup.length}个批次` : '收起批次'}
                         </button>
                       )}
-                      {(order.productBenefits || order.suitableLifeStages || order.feedingGuidance) && (
+                      {(order.texture || order.productBenefits || order.suitableLifeStages || order.feedingGuidance) && (
                         <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground" title={order.productBenefits || order.feedingGuidance}>
-                          {order.productBenefits || order.feedingGuidance}
+                          {order.texture ? `质地：${order.texture}` : (order.productBenefits || order.feedingGuidance)}
+                          {order.texture && (order.productBenefits || order.feedingGuidance) ? ` · ${order.productBenefits || order.feedingGuidance}` : ''}
                           {order.suitableLifeStages ? ` · ${order.suitableLifeStages}` : ''}
                         </div>
                       )}
@@ -781,12 +760,11 @@ export default function ProcurementPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{isGroupSummary ? `共${productGroup.length}个批次` : order.supplier}</td>
                     <td className="px-4 py-3 text-muted-foreground">{isGroupSummary ? '多批次' : order.purchaseDate}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{order.productionDate || '-'}</td>
                     <td className="px-4 py-3">
-                      {order.shelfLife ? (
+                      {expiry ? (
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-muted-foreground" />
-                          <span className="text-muted-foreground">{formatShelfLife(order)}</span>
+                          <span className="text-muted-foreground">{expiry.expiryDate}</span>
                           {expiry && expiry.daysLeft <= 7 && (
                             <Badge className="ml-1 text-[10px] px-1 py-0 bg-[#E88888]/15 text-[#E88888] border-0">
                               {expiryDaysLabel(expiry.daysLeft, true)}
@@ -1327,101 +1305,6 @@ function HistoryTextareaAutocomplete({ value, values, onChange, placeholder }: {
   );
 }
 
-const MAX_PRODUCT_IMAGES = 4;
-
-function ProductImageField({ imageUrls, onChange, onAnalysis }: {
-  imageUrls: string[];
-  onChange: (value: string[]) => void;
-  onAnalysis: (analysis: ProductImageAnalysis) => void;
-}) {
-  const [analyzing, setAnalyzing] = useState(false);
-  const [error, setError] = useState('');
-  const inputId = React.useId();
-
-  const handleFiles = async (files: File[]) => {
-    setError('');
-    const remainingSlots = MAX_PRODUCT_IMAGES - imageUrls.length;
-    if (remainingSlots <= 0) {
-      setError(`每条记录最多保存 ${MAX_PRODUCT_IMAGES} 张图片`);
-      return;
-    }
-    const selectedFiles = files.slice(0, remainingSlots);
-    try {
-      const compressed = await Promise.all(selectedFiles.map(file => compressProductImage(file)));
-      onChange(Array.from(new Set([...imageUrls, ...compressed])).slice(0, MAX_PRODUCT_IMAGES));
-      if (files.length > remainingSlots) setError(`已添加前 ${remainingSlots} 张，每条记录最多 ${MAX_PRODUCT_IMAGES} 张`);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '图片读取失败');
-    }
-  };
-
-  const handleAnalyze = async () => {
-    if (!imageUrls.length || analyzing) return;
-    setAnalyzing(true);
-    setError('');
-    try {
-      onAnalysis(await analyzeProductImages(imageUrls));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '图片识别失败');
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  return (
-    <div className="rounded-lg border border-border/70 p-3">
-      <div>
-        <Label>商品图片（可选）</Label>
-        <p className="mt-1 text-xs text-muted-foreground">最多 {MAX_PRODUCT_IMAGES} 张，可一次多选；采购列表只显示第一张，识别时会读取全部图片。</p>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {imageUrls.map((imageUrl, index) => (
-          <div key={`${imageUrl.slice(-24)}-${index}`} className="relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-            <Image src={imageUrl} alt={`商品包装图 ${index + 1}`} fill sizes="72px" unoptimized className="object-cover" />
-            {index === 0 ? (
-              <span className="absolute bottom-1 left-1 rounded bg-foreground/75 px-1.5 py-0.5 text-[10px] text-background">首图</span>
-            ) : (
-              <button
-                type="button"
-                aria-label={`将第 ${index + 1} 张设为首图`}
-                title="设为首图"
-                onClick={() => onChange([imageUrl, ...imageUrls.filter((_, imageIndex) => imageIndex !== index)])}
-                className="absolute bottom-1 left-1 flex h-6 w-6 items-center justify-center rounded bg-background/90 text-foreground shadow-sm hover:bg-background"
-              >
-                <Star className="h-3.5 w-3.5" />
-              </button>
-            )}
-            <button
-              type="button"
-              aria-label={`移除第 ${index + 1} 张图片`}
-              title="移除图片"
-              onClick={() => onChange(imageUrls.filter((_, imageIndex) => imageIndex !== index))}
-              className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded bg-background/90 text-destructive shadow-sm hover:bg-background"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ))}
-        {!imageUrls.length && (
-          <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><ImagePlus className="h-5 w-5" /></div>
-        )}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <input id={inputId} type="file" accept="image/*" multiple className="hidden" onChange={event => { const files = Array.from(event.target.files || []); if (files.length) void handleFiles(files); event.target.value = ''; }} />
-        <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById(inputId)?.click()} disabled={imageUrls.length >= MAX_PRODUCT_IMAGES}>
-          <ImagePlus className="h-3.5 w-3.5" />添加图片
-        </Button>
-        {imageUrls.length > 0 && <Button type="button" variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
-          {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
-          {analyzing ? '识别中…' : `识别全部 ${imageUrls.length} 张`}
-        </Button>}
-        {imageUrls.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={() => onChange([])}>全部移除</Button>}
-      </div>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
 function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, benefitsHistory = [], lifeStageHistory = [], feedingGuidanceHistory = [], onChange }: {
   benefits: string;
   suitableLifeStages: string;
@@ -1435,7 +1318,7 @@ function ProductInfoFields({ benefits, suitableLifeStages, feedingGuidance, bene
     <div className="space-y-3 rounded-lg border border-border/70 p-3">
       <div>
         <Label>商品资料（可选）</Label>
-        <p className="mt-1 text-xs text-muted-foreground">可由图片识别填入，也可以自己修改。功效仅作包装信息记录，不替代兽医建议。</p>
+        <p className="mt-1 text-xs text-muted-foreground">记录商品用途和适用阶段，方便后续喂食计划参考；不替代兽医建议。</p>
       </div>
       <div className="space-y-1.5">
         <Label>功效 / 用途</Label>
@@ -1458,6 +1341,7 @@ function openFeedingPlanDraft(order: Order) {
     order.brand ? `品牌：${order.brand}` : '',
     `商品：${order.itemName}`,
     order.itemGroup ? `系列：${order.itemGroup}` : '',
+    order.texture ? `质地：${order.texture}` : '',
     order.category ? `分类：${order.category}` : '',
     order.productBenefits ? `功效/用途：${order.productBenefits}` : '',
     order.suitableLifeStages ? `适合阶段：${order.suitableLifeStages}` : '',
@@ -1469,43 +1353,6 @@ function openFeedingPlanDraft(order: Order) {
   }));
 }
 
-function applyProductAnalysis<T extends {
-  brand: string;
-  itemName: string;
-  itemGroup: string;
-  category: string;
-  quantity: string;
-  unit: string;
-  totalPrice: string;
-  supplier: string;
-  packageCount: string;
-  packageCountUnit: string;
-  packageSize: string;
-  packageUnit: string;
-  productBenefits: string;
-  suitableLifeStages: string;
-  feedingGuidance: string;
-}>(current: T, analysis: ProductImageAnalysis): T {
-  return {
-    ...current,
-    brand: analysis.brand || current.brand,
-    itemName: analysis.itemName || current.itemName,
-    itemGroup: analysis.itemGroup || current.itemGroup,
-    category: analysis.category || current.category,
-    quantity: analysis.quantity ? String(analysis.quantity) : current.quantity,
-    unit: analysis.unit || current.unit,
-    totalPrice: analysis.totalPrice !== undefined ? String(analysis.totalPrice) : current.totalPrice,
-    supplier: analysis.supplier || current.supplier,
-    packageCount: analysis.packageCount ? String(analysis.packageCount) : current.packageCount,
-    packageCountUnit: analysis.packageCountUnit || current.packageCountUnit,
-    packageSize: analysis.packageSize ? String(analysis.packageSize) : current.packageSize,
-    packageUnit: analysis.packageUnit || current.packageUnit,
-    productBenefits: analysis.productBenefits || current.productBenefits,
-    suitableLifeStages: analysis.suitableLifeStages || current.suitableLifeStages,
-    feedingGuidance: analysis.feedingGuidance || current.feedingGuidance,
-  };
-}
-
 function SpecManagerDialog({ specs, onAdd, onUpdate, onDelete, onClose }: {
   specs: ProductSpec[];
   onAdd: (spec: Omit<ProductSpec, 'id' | 'createdAt'>) => string;
@@ -1514,16 +1361,16 @@ function SpecManagerDialog({ specs, onAdd, onUpdate, onDelete, onClose }: {
   onClose: () => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ brand: '', itemName: '', itemGroup: '', category: '猫粮', purchaseUnit: '', inventoryUnit: '', unitsPerPurchase: '', packageSize: '', packageUnit: '' });
-  const reset = () => { setEditingId(null); setForm({ brand: '', itemName: '', itemGroup: '', category: '猫粮', purchaseUnit: '', inventoryUnit: '', unitsPerPurchase: '', packageSize: '', packageUnit: '' }); };
+  const [form, setForm] = useState({ brand: '', itemName: '', itemGroup: '', texture: '', category: '猫粮', purchaseUnit: '', inventoryUnit: '', unitsPerPurchase: '', packageSize: '', packageUnit: '' });
+  const reset = () => { setEditingId(null); setForm({ brand: '', itemName: '', itemGroup: '', texture: '', category: '猫粮', purchaseUnit: '', inventoryUnit: '', unitsPerPurchase: '', packageSize: '', packageUnit: '' }); };
   const edit = (spec: ProductSpec) => {
-    setForm({ brand: spec.brand || '', itemName: spec.itemName, itemGroup: spec.itemGroup || '', category: spec.category, purchaseUnit: spec.purchaseUnit, inventoryUnit: spec.inventoryUnit, unitsPerPurchase: String(spec.unitsPerPurchase), packageSize: spec.packageSize ? String(spec.packageSize) : '', packageUnit: spec.packageUnit || '' });
+    setForm({ brand: spec.brand || '', itemName: spec.itemName, itemGroup: spec.itemGroup || '', texture: spec.texture || '', category: spec.category, purchaseUnit: spec.purchaseUnit, inventoryUnit: spec.inventoryUnit, unitsPerPurchase: String(spec.unitsPerPurchase), packageSize: spec.packageSize ? String(spec.packageSize) : '', packageUnit: spec.packageUnit || '' });
     setEditingId(spec.id);
   };
   const save = () => {
     const units = Number(form.unitsPerPurchase);
     if (!form.itemName.trim() || !form.purchaseUnit.trim() || !form.inventoryUnit.trim() || !Number.isFinite(units) || units <= 0) return;
-    const payload = { catId: 'shared', brand: form.brand.trim() || undefined, itemName: form.itemName.trim(), itemGroup: form.itemGroup.trim() || undefined, category: form.category, purchaseUnit: form.purchaseUnit.trim(), inventoryUnit: form.inventoryUnit.trim(), unitsPerPurchase: units, packageSize: form.packageSize ? Number(form.packageSize) : undefined, packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined };
+    const payload = { catId: 'shared', brand: form.brand.trim() || undefined, itemName: form.itemName.trim(), itemGroup: form.itemGroup.trim() || undefined, texture: form.texture.trim() || undefined, category: form.category, purchaseUnit: form.purchaseUnit.trim(), inventoryUnit: form.inventoryUnit.trim(), unitsPerPurchase: units, packageSize: form.packageSize ? Number(form.packageSize) : undefined, packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined };
     if (editingId) onUpdate(editingId, payload);
     else onAdd(payload);
     reset();
@@ -1536,6 +1383,7 @@ function SpecManagerDialog({ specs, onAdd, onUpdate, onDelete, onClose }: {
           <HistoryTextAutocomplete value={form.brand} values={specs.map(spec => spec.brand || '').filter(Boolean)} onChange={brand => setForm(current => ({ ...current, brand }))} placeholder="品牌，如：小灶猫饭" />
           <Input value={form.itemName} onChange={event => setForm(current => ({ ...current, itemName: event.target.value }))} placeholder="物品名称，如：猫饭" />
           <Input value={form.itemGroup} onChange={event => setForm(current => ({ ...current, itemGroup: event.target.value }))} placeholder="系列 / 大标题（可选）" />
+          <HistoryTextAutocomplete value={form.texture} values={specs.map(spec => spec.texture || '').filter(Boolean)} onChange={texture => setForm(current => ({ ...current, texture }))} placeholder="质地（可选），如：泥状、慕斯、肉泥" />
           <Select value={form.category} onValueChange={category => setForm(current => ({ ...current, category }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><InventoryCategoryOptions /></SelectContent></Select>
           <HistoryTextAutocomplete value={form.purchaseUnit} values={specs.map(spec => spec.purchaseUnit)} onChange={purchaseUnit => setForm(current => ({ ...current, purchaseUnit }))} placeholder="标准采购单位，如：盒" />
           <HistoryTextAutocomplete value={form.inventoryUnit} values={specs.map(spec => spec.inventoryUnit)} onChange={inventoryUnit => setForm(current => ({ ...current, inventoryUnit }))} placeholder="库存基本单位，如：杯" />
@@ -1561,6 +1409,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     brand: order.brand || '',
     itemName: order.itemName,
     itemGroup: order.itemGroup || '',
+    texture: order.texture || '',
     category: order.category,
     quantity: String(orderPurchaseQuantity(order)),
     unit: orderPurchaseUnit(order),
@@ -1574,7 +1423,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
     packageCountUnit: orderPurchasePackSize(order) > 1 ? order.unit : '',
     packageSize: order.packageSize ? String(order.packageSize) : '',
     packageUnit: order.packageUnit || '',
-    imageUrls: order.imageUrls?.length ? order.imageUrls : order.imageUrl ? [order.imageUrl] : [],
     productBenefits: order.productBenefits || '',
     suitableLifeStages: order.suitableLifeStages || '',
     feedingGuidance: order.feedingGuidance || '',
@@ -1606,6 +1454,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
+      texture: form.texture.trim() || undefined,
       category: form.category,
       quantity: quantity * (form.packageCount ? Number(form.packageCount) : 1),
       unit: form.packageCountUnit.trim() || (form.packageSize && form.packageUnit.trim() ? form.packageUnit.trim() : form.unit.trim()),
@@ -1624,8 +1473,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
       packageCountUnit: undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
-      imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
-      imageUrl: form.imageUrls[0] || undefined,
       productBenefits: form.productBenefits.trim() || undefined,
       suitableLifeStages: form.suitableLifeStages.trim() || undefined,
       feedingGuidance: form.feedingGuidance.trim() || undefined,
@@ -1640,11 +1487,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           <DialogTitle>编辑采购记录</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-1">
-          <ProductImageField
-            imageUrls={form.imageUrls}
-            onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
-            onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
-          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>品牌（可选）</Label>
@@ -1663,6 +1505,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
                     brand: template.brand || '',
                     itemName: template.itemName,
                     itemGroup: template.itemGroup || '',
+                    texture: template.texture || '',
                     category: template.category,
                     unit: orderPurchaseUnit(template),
                     supplier: template.supplier,
@@ -1672,7 +1515,6 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
                     packageCountUnit: orderPurchasePackSize(template) > 1 ? template.unit : '',
                     packageSize: template.packageSize ? String(template.packageSize) : '',
                     packageUnit: template.packageUnit || '',
-                    imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
                     productBenefits: template.productBenefits || '',
                     suitableLifeStages: template.suitableLifeStages || '',
                     feedingGuidance: template.feedingGuidance || '',
@@ -1685,6 +1527,10 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
           <div className="space-y-1.5">
             <Label>物资系列 / 大标题（可选）</Label>
             <HistoryTextAutocomplete value={form.itemGroup} values={recentOrderValues(orders, item => item.itemGroup)} onChange={itemGroup => setForm(current => ({ ...current, itemGroup }))} placeholder="输入可联想历史系列，如：原切冻干" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>质地（可选）</Label>
+            <HistoryTextAutocomplete value={form.texture} values={recentOrderValues(orders, item => item.texture)} onChange={texture => setForm(current => ({ ...current, texture }))} placeholder="如：泥状、慕斯、肉泥、颗粒" />
           </div>
           <ProductInfoFields
             benefits={form.productBenefits}
@@ -1796,16 +1642,16 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
 }) {
   const [mode, setMode] = useState<'single' | 'mixed' | 'bundle'>('single');
   const [form, setForm] = useState({
-    brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
+    brand: '', itemName: '', itemGroup: '', texture: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
     bundleName: '', bundleQuantity: '1', bundleUnit: '盒', specId: '', inventoryQuantity: '',
     productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit,
     packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '',
-    imageUrls: [] as string[], productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
+    productBenefits: '', suitableLifeStages: '', feedingGuidance: '', syncExpense: true,
     purchaseDate: localDateKey(),
   });
   const [bundleItems, setBundleItems] = useState([
-    { id: 'bundle_1', specId: '', brand: '', itemGroup: '', itemName: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
-    { id: 'bundle_2', specId: '', brand: '', itemGroup: '', itemName: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_1', specId: '', brand: '', itemGroup: '', itemName: '', texture: '', category: '主食罐头', quantity: '', unit: '罐', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
+    { id: 'bundle_2', specId: '', brand: '', itemGroup: '', itemName: '', texture: '', category: '主食餐包', quantity: '', unit: '包', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day' as ShelfLifeUnit, packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' },
   ]);
   const [mixedFlavors, setMixedFlavors] = useState([
     { id: 'flavor_1', specId: '', name: '', quantity: '' },
@@ -1824,6 +1670,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       brand: spec.brand || item.brand,
       itemName: spec.itemName,
       itemGroup: spec.itemGroup || item.itemGroup,
+      texture: spec.texture || item.texture,
       category: spec.category,
       quantity: String(spec.unitsPerPurchase),
       unit: spec.inventoryUnit,
@@ -1844,6 +1691,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       ...current,
       brand: current.brand || spec.brand || '',
       bundleName: current.bundleName || spec.itemGroup || '',
+      texture: current.texture || spec.texture || '',
       category: spec.category,
       bundleUnit: current.bundleUnit || spec.purchaseUnit,
       unit: spec.inventoryUnit,
@@ -1858,6 +1706,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       brand: template.brand || '',
       itemName: template.itemName,
       itemGroup: template.itemGroup || '',
+      texture: template.texture || '',
       category: template.category,
       quantity: String(orderPurchaseQuantity(template)),
       unit: orderPurchaseUnit(template),
@@ -1870,7 +1719,6 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       packageCountUnit: orderPurchasePackSize(template) > 1 ? template.unit : '',
       packageSize: template.packageSize ? String(template.packageSize) : '',
       packageUnit: template.packageUnit || '',
-      imageUrls: template.imageUrls?.length ? template.imageUrls : template.imageUrl ? [template.imageUrl] : [],
       productBenefits: template.productBenefits || '',
       suitableLifeStages: template.suitableLifeStages || '',
       feedingGuidance: template.feedingGuidance || '',
@@ -1942,6 +1790,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
+      texture: form.texture.trim() || undefined,
       category: form.category,
       purchaseUnit: form.unit.trim(),
       inventoryUnit: specInventoryUnit,
@@ -1977,6 +1826,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
         brand: form.brand.trim() || undefined,
         itemName: flavor.name.trim(),
         itemGroup: bundleName,
+        texture: form.texture.trim() || undefined,
         purchaseBatchId,
         purchaseBundleName: bundleName,
         purchaseBundleQuantity: bundleQuantity,
@@ -1996,8 +1846,6 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
         shelfLifeUnit: form.shelfLife ? form.shelfLifeUnit : undefined,
         packageSize: form.packageSize ? Number(form.packageSize) : undefined,
         packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
-        imageUrls: index === 0 && form.imageUrls.length ? form.imageUrls : undefined,
-        imageUrl: index === 0 ? form.imageUrls[0] || undefined : undefined,
         productBenefits: form.productBenefits.trim() || undefined,
         suitableLifeStages: form.suitableLifeStages.trim() || undefined,
         feedingGuidance: form.feedingGuidance.trim() || undefined,
@@ -2029,6 +1877,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
           brand: item.brand.trim() || undefined,
           itemName: item.itemName.trim(),
           itemGroup: item.itemGroup.trim() || bundleName || undefined,
+          texture: item.texture.trim() || undefined,
           purchaseBatchId,
           purchaseBundleName: bundleName || '组合采购',
           purchaseBundleQuantity: bundleQuantity,
@@ -2095,6 +1944,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       brand: form.brand.trim() || undefined,
       itemName: form.itemName.trim(),
       itemGroup: form.itemGroup.trim() || undefined,
+      texture: form.texture.trim() || undefined,
       category: form.category,
       quantity: actualInventoryQuantity,
       unit: specInventoryUnit,
@@ -2115,8 +1965,6 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
       packageCountUnit: undefined,
       packageSize: form.packageSize ? Number(form.packageSize) : undefined,
       packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
-      imageUrls: form.imageUrls.length ? form.imageUrls : undefined,
-      imageUrl: form.imageUrls[0] || undefined,
       productBenefits: form.productBenefits.trim() || undefined,
       suitableLifeStages: form.suitableLifeStages.trim() || undefined,
       feedingGuidance: form.feedingGuidance.trim() || undefined,
@@ -2136,13 +1984,13 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
   };
 
   return (
-    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[760px]">
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[860px]">
       <DialogHeader>
         <DialogTitle>新建采购订单</DialogTitle>
       </DialogHeader>
-      <div className="space-y-4 pt-2">
-        <div className="grid grid-cols-3 rounded-lg bg-muted/55 p-1" role="tablist" aria-label="采购录入方式">
-          <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'single' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>单品采购</button>
+      <div className="space-y-5 pt-2">
+        <div className="grid grid-cols-3 rounded-xl border border-border/70 bg-muted/35 p-1.5" role="tablist" aria-label="采购录入方式">
+          <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')} className={cn('h-9 rounded-lg text-sm transition-colors', mode === 'single' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>单品采购</button>
           <button
             type="button"
             role="tab"
@@ -2154,9 +2002,9 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                 category: current.category === '猫粮' ? '主食餐盒' : current.category,
               }));
             }}
-            className={cn('h-8 rounded-md px-1 text-sm transition-colors', mode === 'mixed' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}
+          className={cn('h-9 rounded-lg px-1 text-sm transition-colors', mode === 'mixed' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}
           >多口味整盒</button>
-          <button type="button" role="tab" aria-selected={mode === 'bundle'} onClick={() => setMode('bundle')} className={cn('h-8 rounded-md text-sm transition-colors', mode === 'bundle' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>组合采购</button>
+          <button type="button" role="tab" aria-selected={mode === 'bundle'} onClick={() => setMode('bundle')} className={cn('h-9 rounded-lg text-sm transition-colors', mode === 'bundle' ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground')}>组合采购</button>
         </div>
         {mode === 'bundle' ? (
           <>
@@ -2220,7 +2068,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-4">
                     <HistoryTextAutocomplete value={item.brand} values={recentOrderValues(orders, order => order.brand)} onChange={brand => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, brand } : entry))} placeholder="品牌，如：麦德氏" />
                     <HistoryItemAutocomplete
                       value={item.itemName}
@@ -2233,6 +2081,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                           brand: template.brand || '',
                           itemName: template.itemName,
                           itemGroup: template.itemGroup || '',
+                          texture: template.texture || '',
                           category: template.category,
                           quantity: String(orderPurchaseQuantity(template)),
                           unit: orderPurchaseUnit(template),
@@ -2247,6 +2096,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                       placeholder="物品名称，输入可联想"
                     />
                     <HistoryTextAutocomplete value={item.itemGroup} values={recentOrderValues(orders, order => order.itemGroup)} onChange={itemGroup => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, itemGroup } : entry))} placeholder="系列/大标题，如：原切冻干" />
+                    <HistoryTextAutocomplete value={item.texture} values={recentOrderValues(orders, order => order.texture)} onChange={texture => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, texture } : entry))} placeholder="质地（可选）" />
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[130px_80px_80px_minmax(0,1fr)]">
                     <Select value={item.category} onValueChange={category => setBundleItems(current => current.map(entry => entry.id === item.id ? { ...entry, category } : entry))}>
@@ -2279,7 +2129,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, specId: '', brand: '', itemGroup: '', itemName: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' }])} className="w-full">
+              <Button type="button" variant="outline" size="sm" onClick={() => setBundleItems(current => [...current, { id: `bundle_${Date.now()}`, specId: '', brand: '', itemGroup: '', itemName: '', texture: '', category: '零食冻干', quantity: '', unit: '袋', allocatedPrice: '', productionDate: '', shelfLife: '', shelfLifeUnit: 'day', packageCount: '', packageCountUnit: '', packageSize: '', packageUnit: '' }])} className="w-full">
                 <Plus className="h-3.5 w-3.5" />添加库存明细
               </Button>
             </div>
@@ -2293,20 +2143,6 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
           </>
         ) : mode === 'mixed' ? (
           <>
-            <ProductImageField
-              imageUrls={form.imageUrls}
-              onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
-              onAnalysis={analysis => setForm(current => {
-                const analyzed = applyProductAnalysis(current, analysis);
-                return {
-                  ...analyzed,
-                  bundleName: current.bundleName || analysis.itemGroup || analysis.itemName || '',
-                  itemName: current.itemName,
-                  quantity: current.quantity,
-                  unit: current.unit,
-                };
-              })}
-            />
 
             <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
               <div>
@@ -2329,6 +2165,10 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                     onChange={bundleName => setForm(current => ({ ...current, bundleName }))}
                     placeholder="如：幼猫主食餐盒混合装"
                   />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>质地（可选）</Label>
+                  <HistoryTextAutocomplete value={form.texture} values={recentOrderValues(orders, item => item.texture)} onChange={texture => setForm(current => ({ ...current, texture }))} placeholder="如：泥状、慕斯、肉泥、颗粒" />
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -2510,11 +2350,6 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
             <div className="flex items-end text-xs text-muted-foreground">留空时按采购数量 × 包装关系入库；填写后可直接登记散装数量。</div>
           </div>}
         </div>
-        <ProductImageField
-          imageUrls={form.imageUrls}
-          onChange={imageUrls => setForm(current => ({ ...current, imageUrls }))}
-          onAnalysis={analysis => setForm(current => applyProductAnalysis(current, analysis))}
-        />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>品牌（可选）</Label>
@@ -2534,6 +2369,10 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
         <div className="space-y-1.5">
           <Label>物资系列 / 大标题（可选）</Label>
           <HistoryTextAutocomplete value={form.itemGroup} values={recentOrderValues(orders, item => item.itemGroup)} onChange={itemGroup => setForm(current => ({ ...current, itemGroup }))} placeholder="输入可联想历史系列，如：原切冻干" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>质地（可选）</Label>
+          <HistoryTextAutocomplete value={form.texture} values={recentOrderValues(orders, item => item.texture)} onChange={texture => setForm(current => ({ ...current, texture }))} placeholder="如：泥状、慕斯、肉泥、颗粒" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">

@@ -50,6 +50,7 @@ export interface Order {
   /** Legacy cover field retained for older clients and backups. */
   imageUrl?: string;
   /** AI or manually recorded product information. */
+  texture?: string;
   productBenefits?: string;
   suitableLifeStages?: string;
   feedingGuidance?: string;
@@ -75,6 +76,7 @@ export interface ProductSpec {
   unitsPerPurchase: number;
   packageSize?: number;
   packageUnit?: string;
+  texture?: string;
   createdAt: string;
 }
 
@@ -714,7 +716,7 @@ export interface AppState {
 }
 
 const STORAGE_KEY = 'zhongfu-console-data';
-const CURRENT_DATA_VERSION = 4;
+const CURRENT_DATA_VERSION = 5;
 
 export interface AppBackup {
   app: 'zhongfu-console';
@@ -915,12 +917,14 @@ function migrateLegacyDemoData(state: AppState): AppState {
         catId: 'shared',
         brand: order.brand?.trim() || (moveLegacySupplierToBrand ? order.supplier?.trim() || undefined : undefined),
         supplier: moveLegacySupplierToBrand && !order.brand?.trim() && order.supplier?.trim() ? '' : order.supplier,
-        imageUrls: imageUrls.length ? imageUrls : undefined,
-        imageUrl: imageUrls[0] || undefined,
+        // Product photos are no longer used by the app. Clear legacy image
+        // data during this one-time migration while preserving all records.
+        imageUrls: (state.dataVersion ?? 1) < 5 ? undefined : (imageUrls.length ? imageUrls : undefined),
+        imageUrl: (state.dataVersion ?? 1) < 5 ? undefined : (imageUrls[0] || undefined),
       });
     });
   const specs = Array.isArray(state.productSpecs) ? state.productSpecs.filter(spec => spec && typeof spec.itemName === 'string') : [];
-  const specKeys = new Set(specs.map(spec => [spec.brand, spec.itemName, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|')));
+  const specKeys = new Set(specs.map(spec => [spec.brand, spec.itemName, spec.itemGroup, spec.texture, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|')));
   if ((state.dataVersion ?? 1) < 3) migratedOrders.forEach(order => {
     const spec = {
       id: `spec-${order.id}`,
@@ -928,6 +932,7 @@ function migrateLegacyDemoData(state: AppState): AppState {
       brand: order.brand,
       itemName: order.itemName,
       itemGroup: order.itemGroup,
+      texture: order.texture,
       category: order.category,
       purchaseUnit: orderPurchaseUnit(order),
       inventoryUnit: order.unit,
@@ -936,7 +941,7 @@ function migrateLegacyDemoData(state: AppState): AppState {
       packageUnit: order.packageUnit,
       createdAt: order.purchaseDate,
     } satisfies ProductSpec;
-    const key = [spec.brand, spec.itemName, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|');
+    const key = [spec.brand, spec.itemName, spec.itemGroup, spec.texture, spec.category, spec.purchaseUnit, spec.inventoryUnit, spec.unitsPerPurchase, spec.packageSize, spec.packageUnit].join('|');
     if (!specKeys.has(key)) {
       specs.push(spec);
       specKeys.add(key);
