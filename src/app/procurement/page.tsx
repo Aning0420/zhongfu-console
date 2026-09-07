@@ -438,7 +438,7 @@ export default function ProcurementPage() {
                 <Plus className="w-4 h-4 mr-1.5" /> 新建采购
               </Button>
             </DialogTrigger>
-          {showAdd && <AddOrderDialog orders={catOrders} specs={state.productSpecs || []} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} />}
+          {showAdd && <AddOrderDialog orders={catOrders} specs={state.productSpecs || []} onClose={() => setShowAdd(false)} onAdd={addOrder} addExpense={addExpense} addProductSpec={addProductSpec} />}
           </Dialog>
         </div>
         <Dialog open={showSpecs} onOpenChange={setShowSpecs}>
@@ -1789,7 +1789,7 @@ function EditOrderDialog({ order, orders, onClose, onSave }: {
   );
 }
 
-function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders: Order[]; specs: ProductSpec[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => string; addExpense: (expense: Omit<Expense, 'id'>) => void }) {
+function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, addProductSpec }: { orders: Order[]; specs: ProductSpec[]; onClose: () => void; onAdd: (order: Omit<Order, 'id'>) => string; addExpense: (expense: Omit<Expense, 'id'>) => void; addProductSpec: (spec: Omit<ProductSpec, 'id' | 'createdAt'>) => string }) {
   const [mode, setMode] = useState<'single' | 'mixed' | 'bundle'>('single');
   const [form, setForm] = useState({
     brand: '', itemName: '', itemGroup: '', category: '猫粮', quantity: '', unit: '', totalPrice: '', supplier: '',
@@ -2396,6 +2396,44 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense }: { orders:
             </div>
             <div className="flex items-end text-xs text-muted-foreground">留空时按采购数量 × 包装关系入库；填写后可直接登记散装数量。</div>
           </div>}
+          <div className="mt-3 border-t border-primary/10 pt-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm">快速新建规格</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (!form.itemName.trim() || !form.unit.trim()) {
+                    alert('请先填写物资名称和采购单位');
+                    return;
+                  }
+                  const units = form.packageCount ? Number(form.packageCount) : 1;
+                  if (!Number.isFinite(units) || units <= 0) {
+                    alert('请填写正确的包装换算数量');
+                    return;
+                  }
+                  const specId = addProductSpec({
+                    catId: 'shared',
+                    brand: form.brand.trim() || undefined,
+                    itemName: form.itemName.trim(),
+                    itemGroup: form.itemGroup.trim() || undefined,
+                    category: form.category,
+                    purchaseUnit: form.unit.trim(),
+                    inventoryUnit: form.packageCountUnit.trim() || form.unit.trim(),
+                    unitsPerPurchase: units,
+                    packageSize: form.packageSize ? Number(form.packageSize) : undefined,
+                    packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
+                  });
+                  setForm(current => ({ ...current, specId }));
+                }}
+                className="text-xs"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />保存当前为规格
+              </Button>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">将当前填写的品牌、名称、单位、包装换算保存为规格模板，下次采购可直接选择。</p>
+          </div>
         </div>
         <ProductImageField
           imageUrls={form.imageUrls}
