@@ -89,6 +89,15 @@ function bundlePriceLabel(order: Order): string | null {
   return `${order.purchaseBundleName} · ${quantity}${order.purchaseBundleUnit || '套'}共 ¥${(order.purchaseBundleTotalPrice ?? 0).toFixed(2)}`;
 }
 
+function purchaseBatchType(order: Order): Order['purchaseBatchType'] {
+  if (!order.purchaseBatchId) return undefined;
+  if (order.purchaseBatchType) return order.purchaseBatchType;
+  // Older multi-flavor records stored zero per-item prices. Keep those
+  // records readable while treating allocated bundle rows as regular items.
+  if (order.purchaseBundleName && order.unitPrice === 0 && (!order.totalPrice || order.totalPrice === 0)) return 'mixed';
+  return 'bundle';
+}
+
 function inventoryOperationUnits(order: Order): string[] {
   return [order.unit, order.purchaseUnit, order.packageCountUnit, order.packageUnit]
     .filter((unit): unit is string => Boolean(unit?.trim()))
@@ -677,7 +686,7 @@ export default function ProcurementPage() {
                 const needsRestock = order.status === 'delivered' && !order.repurchasedAt && !hasOtherAvailableInventory(order, catOrders)
                   && (ratio <= 0.3 || Boolean(depletion && depletion.daysLeft <= 7));
                 const showGroupHeading = Boolean(order.itemGroup);
-                const showBundlePrice = !order.purchaseBatchId || displayOrders[visibleIndex - 1]?.purchaseBatchId !== order.purchaseBatchId;
+                const batchType = purchaseBatchType(order);
                 const priceHistory = getPriceHistory(
                   order.itemName,
                   orderPurchaseUnit(order),
@@ -743,13 +752,21 @@ export default function ProcurementPage() {
                     <td className="px-4 py-3 text-foreground">
                       {isGroupSummary ? (
                         <span className="text-xs text-muted-foreground">多批次价格</span>
-                      ) : bundlePriceLabel(order) && showBundlePrice ? (
+                      ) : batchType === 'mixed' && bundlePriceLabel(order) ? (
                         <>
-                          <div className="max-w-[220px] text-xs font-medium leading-5">整盒采购</div>
+                          <div className="max-w-[220px] text-xs font-medium leading-5">多口味整盒</div>
                           <div className="max-w-[220px] text-xs leading-5 text-muted-foreground" title={bundlePriceLabel(order) || undefined}>{bundlePriceLabel(order)}</div>
                         </>
-                      ) : order.purchaseBatchId ? (
-                        <div className="whitespace-nowrap text-xs text-muted-foreground">同一整盒采购</div>
+                      ) : batchType === 'bundle' ? (
+                        order.totalPrice && order.totalPrice > 0 ? (
+                          <>
+                            <div className="whitespace-nowrap text-xs font-medium">组合采购分摊</div>
+                            <div className="whitespace-nowrap text-xs text-muted-foreground">¥{orderPurchaseUnitPrice(order).toFixed(2)}/{orderPurchaseUnit(order)}</div>
+                            <div className="whitespace-nowrap text-xs text-muted-foreground">本条 ¥{orderTotalPrice(order).toFixed(2)}</div>
+                          </>
+                        ) : (
+                          <div className="whitespace-nowrap text-xs text-muted-foreground">组合采购·未分摊</div>
+                        )
                       ) : (
                         <>
                           <div className="whitespace-nowrap font-medium">¥{orderPurchaseUnitPrice(order).toFixed(2)}/{orderPurchaseUnit(order)}</div>
@@ -1818,7 +1835,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
   const handleSubmit = () => {
     if (mode === 'mixed') {
       if (!mixedValid) return;
-      const purchaseBatchId = `bundle-${Date.now()}`;
+        const purchaseBatchId = `bundle-${Date.now()}`;
       const bundleName = form.bundleName.trim();
       const relatedOrderIds = mixedFlavors.map((flavor, index) => onAdd({
         catId: 'shared',
@@ -1828,6 +1845,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
         itemGroup: bundleName,
         texture: form.texture.trim() || undefined,
         purchaseBatchId,
+        purchaseBatchType: 'mixed',
         purchaseBundleName: bundleName,
         purchaseBundleQuantity: bundleQuantity,
         purchaseBundleUnit: form.bundleUnit.trim(),
@@ -1879,6 +1897,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
           itemGroup: item.itemGroup.trim() || bundleName || undefined,
           texture: item.texture.trim() || undefined,
           purchaseBatchId,
+          purchaseBatchType: 'bundle',
           purchaseBundleName: bundleName || '组合采购',
           purchaseBundleQuantity: bundleQuantity,
           purchaseBundleUnit: form.bundleUnit.trim() || '单',

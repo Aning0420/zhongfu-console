@@ -260,6 +260,7 @@ export function ChatDialog({ open, onClose }: { open: boolean; onClose: () => vo
             itemName: String(item.item_name || '未知口味').trim(),
             itemGroup: String(item.item_group || bundleName).trim() || undefined,
             purchaseBatchId,
+            purchaseBatchType: 'mixed',
             purchaseBundleName: bundleName,
             purchaseBundleQuantity: bundleQuantity,
             purchaseBundleUnit: bundleUnit,

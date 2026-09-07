@@ -11,6 +11,8 @@ export interface Order {
   itemGroup?: string;
   /** Shared purchase batch metadata for mixed-flavor boxes and assorted bundles. */
   purchaseBatchId?: string;
+  /** Distinguishes a multi-flavor box from an assorted bundle. */
+  purchaseBatchType?: 'mixed' | 'bundle';
   purchaseBundleName?: string;
   purchaseBundleQuantity?: number;
   purchaseBundleUnit?: string;
