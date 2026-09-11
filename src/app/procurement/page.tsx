@@ -2438,6 +2438,41 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">整盒食品示例：数量1、单位盒；每盒6包；每包60g。药品可留空第一行，只填每盒20片。</p>
         </div>
+          <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
+            <p className="text-xs text-muted-foreground">将当前品牌、名称、单位、包装换算保存为规格模板，下次可直接选择。</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!form.itemName.trim() || !form.unit.trim()) {
+                  alert('请先填写物资名称和采购单位');
+                  return;
+                }
+                const units = form.packageCount ? Number(form.packageCount) : 1;
+                if (!Number.isFinite(units) || units <= 0) {
+                  alert('请填写正确的包装换算数量');
+                  return;
+                }
+                const specId = addProductSpec({
+                  catId: 'shared',
+                  brand: form.brand.trim() || undefined,
+                  itemName: form.itemName.trim(),
+                  itemGroup: form.itemGroup.trim() || undefined,
+                  category: form.category,
+                  purchaseUnit: form.unit.trim(),
+                  inventoryUnit: form.packageCountUnit.trim() || form.unit.trim(),
+                  unitsPerPurchase: units,
+                  packageSize: form.packageSize ? Number(form.packageSize) : undefined,
+                  packageUnit: form.packageSize ? form.packageUnit.trim() || undefined : undefined,
+                });
+                setForm(current => ({ ...current, specId }));
+              }}
+              className="shrink-0 text-xs"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />保存为规格
+            </Button>
+          </div>
         {unitPrice > 0 && (
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs">
             <div className="font-medium text-foreground">采购单价：¥{unitPrice.toFixed(2)}/{form.unit.trim() || '单位'}</div>
