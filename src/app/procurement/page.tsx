@@ -2454,7 +2454,7 @@ function AddOrderDialog({ orders, specs, onClose, onAdd, addExpense, onAddSpec, 
                   alert('请填写正确的包装换算数量');
                   return;
                 }
-                const specId = addProductSpec({
+                const specId = onAddSpec({
                   catId: 'shared',
                   brand: form.brand.trim() || undefined,
                   itemName: form.itemName.trim(),
